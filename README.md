@@ -59,6 +59,8 @@ Without a key, the controller uses a narrow local reference checker. It detects 
 
 See [the full recovery rubric](docs/interruption-policy.md) for the equation, thresholds, abstention and calibration plan.
 
+See the [multi-model voice architecture research](docs/multi-model-voice-architecture.md) for a proposed faster interruption controller, source comparisons, computational optimizations and a latency evaluation plan.
+
 | Situation                                                            | Behavior                                                                      |
 | -------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | Explicit “I don't know” / skip request                               | Immediately acknowledge and advance; no old 12-second minimum or cooldown     |

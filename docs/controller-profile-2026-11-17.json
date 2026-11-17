@@ -1,0 +1,70 @@
+{
+  "scope": "Synthetic warmed CPU microbenchmark, not end-to-end interview latency",
+  "measuredAt": "2026-11-17T12:34:53.222Z",
+  "node": "v24.22.1",
+  "platform": "linux",
+  "arch": "x64",
+  "cpu": "AMD EPYC 9V74 80-Core Processor",
+  "warmupPerMeasurement": 100,
+  "samplesPerMeasurement": 1000,
+  "fixture": "Same question, 8/80/500 finalized technical chunks, no coach turns or prior evidence; see source for exact text",
+  "results": [
+    {
+      "segments": 8,
+      "transcriptCharacters": 1480,
+      "clone": {
+        "p50Ms": 0.0086,
+        "p95Ms": 0.0136,
+        "maxMs": 0.5176
+      },
+      "rules": {
+        "p50Ms": 0.0393,
+        "p95Ms": 0.2225,
+        "maxMs": 1.4898
+      },
+      "cloneThenRules": {
+        "p50Ms": 0.0483,
+        "p95Ms": 0.1236,
+        "maxMs": 1.5703
+      }
+    },
+    {
+      "segments": 80,
+      "transcriptCharacters": 14870,
+      "clone": {
+        "p50Ms": 0.0522,
+        "p95Ms": 0.1222,
+        "maxMs": 0.3838
+      },
+      "rules": {
+        "p50Ms": 0.1605,
+        "p95Ms": 0.3993,
+        "maxMs": 2.5636
+      },
+      "cloneThenRules": {
+        "p50Ms": 0.2245,
+        "p95Ms": 0.4233,
+        "maxMs": 3.9235
+      }
+    },
+    {
+      "segments": 500,
+      "transcriptCharacters": 93390,
+      "clone": {
+        "p50Ms": 0.35,
+        "p95Ms": 1.3713,
+        "maxMs": 5.2203
+      },
+      "rules": {
+        "p50Ms": 0.9722,
+        "p95Ms": 2.2233,
+        "maxMs": 10.2615
+      },
+      "cloneThenRules": {
+        "p50Ms": 1.3679,
+        "p95Ms": 3.136,
+        "maxMs": 10.7174
+      }
+    }
+  ]
+}
