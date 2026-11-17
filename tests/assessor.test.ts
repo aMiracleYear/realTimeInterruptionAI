@@ -24,6 +24,14 @@ test("AI adapter sends rubric-bound data and validates the provider response (mo
             {
               message: {
                 content: JSON.stringify({
+                  trajectory: {
+                    correctness: "correct",
+                    errorQuote: null,
+                    correction: null,
+                    explicitGiveUp: false,
+                    selfCorrection: false,
+                    connectingBack: false,
+                  },
                   relevance: 0.9,
                   repetition: 0,
                   confidence: 0.9,

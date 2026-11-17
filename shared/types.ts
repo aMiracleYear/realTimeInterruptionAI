@@ -1,3 +1,4 @@
+import type { Trajectory, TrajectoryInput } from "./trajectory";
 export type Action = "CONTINUE" | "PROMPT" | "REDIRECT" | "PROBE" | "NEXT";
 export type Demo = "drift" | "pause" | "thinking";
 export type SessionStatus = "ready" | "running" | "paused" | "completed";
@@ -17,6 +18,7 @@ export interface Question {
   rubric: Criterion[];
 }
 export interface Segment {
+  sequence: number;
   id: string;
   questionIndex: number;
   text: string;
@@ -39,8 +41,13 @@ export interface Decision {
   reason: string;
   message: string;
   feedback?: "helpful" | "early";
+  interrupt?: boolean;
+  reasonCode?: string;
+  recoveryProbability?: number;
+  trajectory?: Trajectory;
 }
 export interface Signals {
+  trajectory: Trajectory | null;
   relevance: number | null;
   repetition: number;
   confidence: number | null;
@@ -51,7 +58,17 @@ export interface Signals {
   assessment: "waiting" | "rules" | "ai" | "unavailable";
   latencyMs: number | null;
 }
+export interface CoachTurn {
+  sequence: number;
+  id: string;
+  questionIndex: number;
+  text: string;
+  status: "queued" | "spoken" | "interrupted";
+  heardText: string;
+  playbackMs: number;
+}
 export interface Session {
+  coachTurns: CoachTurn[];
   id: string;
   status: SessionStatus;
   budget: number;
@@ -71,6 +88,8 @@ export interface Session {
   completedReason?: string;
 }
 export interface Assessment {
+  origin?: "rules" | "ai";
+  trajectory?: TrajectoryInput;
   relevance: number;
   repetition: number;
   confidence: number;
@@ -79,7 +98,20 @@ export interface Assessment {
 }
 export type ClientMessage =
   | { type: "start"; budget: number; demo?: Demo }
-  | { type: "segment"; text: string; confidence: number | null }
+  | {
+      type: "segment";
+      text: string;
+      confidence: number | null;
+      questionIndex?: number;
+    }
+  | {
+      type: "playback";
+      id: string;
+      status: "spoken" | "interrupted";
+      heardText: string;
+      playbackMs: number;
+    }
+  | { type: "preview"; text: string; questionIndex: number }
   | { type: "activity" }
   | { type: "pause" | "resume" | "finish" | "next" | "think" | "hint" | "end" }
   | { type: "feedback"; id: string; value: "helpful" | "early" };

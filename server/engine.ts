@@ -1,3 +1,10 @@
+import {
+  RECOVERY_RUBRIC,
+  giveUpIntent,
+  neutralTrajectory,
+  recoveryEstimate,
+} from "../shared/trajectory";
+import { checkReference } from "../shared/references";
 import { randomUUID } from "node:crypto";
 import { questions } from "../shared/questions";
 import type { Assessment, Decision, Demo, Session } from "../shared/types";
@@ -19,6 +26,7 @@ const stop = new Set(
 export function createSession(budget = 600, demo?: Demo): Session {
   return {
     id: randomUUID(),
+    coachTurns: [],
     status: "running",
     budget,
     elapsed: 0,
@@ -28,6 +36,7 @@ export function createSession(budget = 600, demo?: Demo): Session {
     evidence: [],
     decisions: [],
     signals: {
+      trajectory: null,
       relevance: null,
       repetition: 0,
       confidence: null,
@@ -68,7 +77,12 @@ export function baselineAssessment(s: Session): Assessment {
     : 0;
   // Scan recent trusted chunks as well as the latest one so coalescing fast updates cannot lose evidence.
   const evidence = segments.slice(-8).flatMap((segment) => {
-    const text = segment.text;
+    let text = segment.text;
+    // Acknowledged uncertainty does not erase a concrete explanation that follows it.
+    if (/\b(?:don.t know|do not know|not sure)\b/i.test(text)) {
+      const bridge = /\b(?:but|however)\b/i.exec(text);
+      if (bridge) text = text.slice(bridge.index + bridge[0].length).trim();
+    }
     const isExplanation =
       words(text).length >= 9 &&
       /\b(because|to|so|check|would|by|using|compare|first|then|i)\b/i.test(
@@ -89,12 +103,29 @@ export function baselineAssessment(s: Session): Assessment {
       .filter((r) => r.keywords.some((k) => text.toLowerCase().includes(k)))
       .map((r) => ({ criterionId: r.id, quote: text }));
   });
+  const error = checkReference(q.id, latest);
+  const selfCorrection =
+    /\b(?:actually|on second thought|let me (?:correct|reconsider)|i (?:meant|was wrong)|rather than|instead i|that(?:'s| is) (?:wrong|incorrect))\b/i.test(
+      latest,
+    );
+  const connectingBack =
+    /\b(?:this (?:relates|connects|brings me back)|to (?:relate|connect|bring) (?:this|that) back|the connection (?:is|to)|in terms of the (?:shaft|pump|design))\b/i.test(
+      latest,
+    );
   return {
+    trajectory: {
+      correctness: error ? "incorrect" : "unknown",
+      errorQuote: error?.quote ?? null,
+      correction: error?.correction ?? null,
+      explicitGiveUp: giveUpIntent(latest),
+      selfCorrection,
+      connectingBack,
+    },
     relevance: hits.length ? Math.min(1, 0.55 + hits.length * 0.1) : 0.12,
     repetition: repeat,
-    confidence: 0.8,
-    productiveReasoning: hits.length > 0 && repeat < 0.8,
-    evidence,
+    confidence: error || giveUpIntent(latest) ? 0.97 : 0.86,
+    productiveReasoning: hits.length > 0 && repeat < 0.8 && !error,
+    evidence: error || giveUpIntent(latest) ? [] : evidence,
   };
 }
 export function addSegment(
@@ -104,6 +135,7 @@ export function addSegment(
 ) {
   if (s.status !== "running" || s.awaitingNext) return;
   s.segments.push({
+    sequence: s.segments.length + s.coachTurns.length,
     id: randomUUID(),
     questionIndex: s.questionIndex,
     text,
@@ -118,26 +150,74 @@ export function applyAssessment(
   a: Assessment,
   source: "rules" | "ai",
   latencyMs: number,
+  preview?: string,
 ) {
-  const latest = s.segments
-    .filter((t) => t.questionIndex === s.questionIndex)
-    .at(-1);
+  const latest = preview
+    ? { text: preview, confidence: null }
+    : s.segments.filter((t) => t.questionIndex === s.questionIndex).at(-1);
   if (!latest) return;
   const q = questions[s.questionIndex];
   s.signals.assessment = source;
   s.signals.assessmentConfidence = a.confidence;
   s.signals.latencyMs = latencyMs;
-  // Unknown ASR confidence remains unknown: abstain instead of inventing certainty.
+  const t = a.trajectory ?? neutralTrajectory();
+  // Explicit conversational intent is locally checked even when a model fails to identify it.
+  t.explicitGiveUp = giveUpIntent(latest.text);
+  // Do not trust a model's unsupported assertion of technical error.
+  if (
+    t.correctness === "incorrect" &&
+    (!t.errorQuote || !latest.text.includes(t.errorQuote))
+  ) {
+    t.correctness = "unknown";
+    t.errorQuote = null;
+    t.correction = null;
+  }
+  const knownLowAsr =
+    latest.confidence !== null && latest.confidence < POLICY.confidenceGate;
   const confident =
-    latest.confidence !== null &&
-    latest.confidence >= POLICY.confidenceGate &&
-    a.confidence >= POLICY.confidenceGate;
+    !knownLowAsr && a.confidence >= RECOVERY_RUBRIC.semanticConfidenceGate;
   s.signals.relevance = a.relevance;
   s.signals.repetition = a.repetition;
   if (!confident) {
     s.signals.driftStreak = 0;
+    s.signals.trajectory = null;
     s.insight =
-      "Recognition or assessment is uncertain. Keeping interruptions on hold.";
+      "The transcript or judgment is uncertain. I’ll listen rather than guess.";
+    return;
+  }
+  const prior = s.signals.trajectory;
+  // Repeated identical interim/final results are one window, not corroborating evidence.
+  const distinctWindow =
+    !prior ||
+    (prior.windowText !== latest.text &&
+      (!latest.text.startsWith(prior.windowText) ||
+        words(latest.text).length - words(prior.windowText).length >= 5));
+  const drifting =
+    words(latest.text).length >= 6 &&
+    (a.relevance < 0.35 || (a.repetition > 0.86 && !a.productiveReasoning));
+  if (distinctWindow)
+    s.signals.driftStreak = drifting ? s.signals.driftStreak + 1 : 0;
+  const estimate = recoveryEstimate(
+    t,
+    a.relevance,
+    a.repetition,
+    a.productiveReasoning,
+    s.signals.driftStreak,
+  );
+  s.signals.trajectory = {
+    ...t,
+    recoveryProbability: estimate.probability,
+    factors: estimate.factors,
+    basis: source === "rules" ? "heuristic" : "ai-estimate",
+    rubricVersion: RECOVERY_RUBRIC.version,
+    provisional: Boolean(preview),
+    windowText: latest.text,
+  };
+  if (preview) {
+    s.insight =
+      t.selfCorrection || t.connectingBack
+        ? "You appear to be working back toward the question. I’m listening."
+        : "Following the direction of your answer…";
     return;
   }
   let added = 0;
@@ -145,7 +225,9 @@ export function applyAssessment(
     (t) => t.questionIndex === s.questionIndex,
   );
   const transcript = segments.map((t) => t.text).join("\n");
-  for (const e of a.evidence) {
+  for (const e of t.correctness === "incorrect" || t.explicitGiveUp
+    ? []
+    : a.evidence) {
     if (
       !q.rubric.some((r) => r.id === e.criterionId) ||
       e.quote.trim().length < 12 ||
@@ -192,10 +274,7 @@ export function applyAssessment(
     added++;
   }
   if (added || a.productiveReasoning) s.signals.lastProgressAt = s.elapsed;
-  s.signals.driftStreak =
-    a.relevance < 0.35 || (a.repetition > 0.86 && !added)
-      ? s.signals.driftStreak + 1
-      : 0;
+
   s.insight = added
     ? `${added} new rubric signal${added > 1 ? "s" : ""} captured. Keep building your answer.`
     : a.productiveReasoning
@@ -233,6 +312,79 @@ export function decide(s: Session, finished = false): Decision | undefined {
   const missing = q.rubric.find(
     (r) => !current.some((e) => e.criterionId === r.id),
   );
+  const trajectory = s.signals.trajectory;
+  const canAct =
+    trajectory &&
+    s.signals.assessment !== "unavailable" &&
+    (s.signals.assessmentConfidence ?? 0) >=
+      RECOVERY_RUBRIC.semanticConfidenceGate;
+  if (canAct && trajectory.explicitGiveUp) {
+    const d = emit(
+      s,
+      "NEXT",
+      "The candidate explicitly chose not to continue.",
+      "No problem. Let’s try another question.",
+    );
+    Object.assign(d, {
+      interrupt: true,
+      reasonCode: "give_up",
+      recoveryProbability: trajectory.recoveryProbability,
+      trajectory: structuredClone(trajectory),
+    });
+    return d;
+  }
+  if (
+    canAct &&
+    !trajectory.selfCorrection &&
+    !trajectory.connectingBack &&
+    s.elapsed >= s.protectedUntil
+  ) {
+    const wrong = trajectory.correctness === "incorrect";
+    const sustained =
+      s.signals.driftStreak >= RECOVERY_RUBRIC.minimumDriftWindows;
+    if (
+      trajectory.recoveryProbability <= RECOVERY_RUBRIC.moveOnBelow &&
+      (wrong || sustained)
+    ) {
+      const message = wrong
+        ? `Let’s stop there. ${trajectory.correction ?? "That reasoning conflicts with the question’s reference."} We’ll move to another question.`
+        : "Let me stop you there. We’ve moved away from the question without a clear route back. Let’s try the next one.";
+      const d = emit(
+        s,
+        "NEXT",
+        wrong
+          ? "A specific technical error and low estimated recovery justify moving on."
+          : "Sustained drift and low estimated recovery justify moving on.",
+        message,
+      );
+      Object.assign(d, {
+        interrupt: true,
+        reasonCode: wrong ? "incorrect_low_recovery" : "drift_low_recovery",
+        recoveryProbability: trajectory.recoveryProbability,
+        trajectory: structuredClone(trajectory),
+      });
+      return d;
+    }
+    if (
+      sustained &&
+      trajectory.recoveryProbability < RECOVERY_RUBRIC.listenAbove &&
+      s.elapsed - s.lastActionAt >= 8
+    ) {
+      const d = emit(
+        s,
+        "REDIRECT",
+        "Recovery is possible but uncertain; offer a brief route back.",
+        `Bring that back to ${q.topic.toLowerCase()}. ${missing?.probe ?? q.context}`,
+      );
+      Object.assign(d, {
+        interrupt: true,
+        reasonCode: "recoverable_drift",
+        recoveryProbability: trajectory.recoveryProbability,
+        trajectory: structuredClone(trajectory),
+      });
+      return d;
+    }
+  }
   if (finished) {
     if (!s.segments.some((t) => t.questionIndex === s.questionIndex))
       return emit(
@@ -279,11 +431,6 @@ export function decide(s: Session, finished = false): Decision | undefined {
       "That gives us a useful picture of your approach. Shall we move on?",
     );
   if (
-    s.signals.confidence === null &&
-    s.segments.some((t) => t.questionIndex === s.questionIndex)
-  )
-    return;
-  if (
     s.signals.confidence !== null &&
     s.signals.confidence < POLICY.confidenceGate
   )
@@ -294,17 +441,6 @@ export function decide(s: Session, finished = false): Decision | undefined {
       s.signals.assessmentConfidence < POLICY.confidenceGate)
   )
     return;
-  if (
-    s.signals.driftStreak >= 2 &&
-    s.elapsed - s.signals.lastProgressAt >= POLICY.progressGrace
-  ) {
-    return emit(
-      s,
-      "REDIRECT",
-      "Two stable updates show drift or repetition without new rubric evidence.",
-      `Let’s bring that back to ${q.topic.toLowerCase()}. ${missing?.probe ?? q.context}`,
-    );
-  }
   if (
     silence >= POLICY.pauseTolerance &&
     s.elapsed - s.signals.lastProgressAt >= POLICY.pauseTolerance &&
@@ -334,6 +470,7 @@ export function advance(s: Session) {
   s.protectedUntil = 0;
   s.lastActionAt = s.elapsed;
   s.signals = {
+    trajectory: null,
     relevance: null,
     repetition: 0,
     confidence: null,

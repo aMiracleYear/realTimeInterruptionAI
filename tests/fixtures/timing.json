@@ -21,7 +21,13 @@
       }
     ],
     "controls": [],
-    "windows": [{ "start": 24, "end": 28, "actions": ["REDIRECT"] }]
+    "windows": [
+      {
+        "start": 23,
+        "end": 24,
+        "actions": ["NEXT"]
+      }
+    ]
   },
   {
     "id": "long-pause",
@@ -35,7 +41,13 @@
       }
     ],
     "controls": [],
-    "windows": [{ "start": 23, "end": 27, "actions": ["PROMPT"] }]
+    "windows": [
+      {
+        "start": 23,
+        "end": 27,
+        "actions": ["PROMPT"]
+      }
+    ]
   },
   {
     "id": "productive-thinking",
@@ -73,7 +85,7 @@
       },
       {
         "at": 15,
-        "confidence": null,
+        "confidence": 0.3,
         "text": "The food and music at the party made the whole weekend wonderful, and we talked about another holiday."
       }
     ],
@@ -86,7 +98,13 @@
     "duration": 26,
     "segments": [],
     "controls": [],
-    "windows": [{ "start": 18, "end": 22, "actions": ["PROMPT"] }]
+    "windows": [
+      {
+        "start": 18,
+        "end": 22,
+        "actions": ["PROMPT"]
+      }
+    ]
   },
   {
     "id": "thinking-override",
@@ -99,7 +117,18 @@
         "text": "First I would calculate the torque from power and speed to determine the bending loads at the supports."
       }
     ],
-    "controls": [{ "at": 10, "type": "think" }],
-    "windows": [{ "start": 40, "end": 44, "actions": ["PROMPT"] }]
+    "controls": [
+      {
+        "at": 10,
+        "type": "think"
+      }
+    ],
+    "windows": [
+      {
+        "start": 40,
+        "end": 44,
+        "actions": ["PROMPT"]
+      }
+    ]
   }
 ]

@@ -1,1343 +1,903 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Activity,
   ArrowDownToLine,
   ArrowRight,
   AudioLines,
   Check,
-  CheckCheck,
   ChevronDown,
-  ChevronRight,
-  CircleHelp,
   Clock3,
-  Coffee,
   FileText,
   Headphones,
+  Info,
   Lightbulb,
+  MessageSquare,
   Mic,
   MicOff,
-  MoveUpRight,
-  Pause,
-  Play,
-  Radio,
+  PhoneOff,
   Send,
+  Settings2,
   ShieldCheck,
-  Square,
-  Target,
   Volume2,
-  VolumeX,
-  Waves,
   X,
 } from "lucide-react";
-import type { Action, ClientMessage, Demo, Session } from "../shared/types";
+import type { ClientMessage, Session } from "../shared/types";
 import { questions } from "../shared/questions";
-import { useSpeech } from "./useSpeech";
-const time = (seconds: number) =>
+import { references } from "../shared/references";
+import { RECOVERY_RUBRIC } from "../shared/trajectory";
+import { useVoice, type CoachMessage, type VoiceTransport } from "./useVoice";
+const formatTime = (seconds: number) =>
   `${Math.floor(Math.max(0, seconds) / 60)
     .toString()
     .padStart(2, "0")}:${Math.floor(Math.max(0, seconds) % 60)
     .toString()
     .padStart(2, "0")}`;
-const actionLabels: Record<Action, string> = {
-  CONTINUE: "Listening",
-  PROMPT: "A gentle nudge",
-  REDIRECT: "Let’s refocus",
-  PROBE: "Go a little deeper",
-  NEXT: "Ready to move on",
-};
-type Page = "studio" | "review" | "approach";
 export default function App() {
-  const [page, setPage] = useState<Page>("studio");
   const [session, setSession] = useState<Session>();
-  const [connected, setConnected] = useState(false);
-  const [mode, setMode] = useState<"rules" | "ai">("rules");
-  const [budget, setBudget] = useState(600);
-  const [input, setInput] = useState("");
-  const [inputMode, setInputMode] = useState<"text" | "voice">("text");
-  const [voiceConsent, setVoiceConsent] = useState(false);
-  const [voiceOutput, setVoiceOutput] = useState(false);
-  const [warning, setWarning] = useState("");
-  const [tab, setTab] = useState<"transcript" | "notes">("transcript");
-  const [expanded, setExpanded] = useState<string>();
-  const [showEnd, setShowEnd] = useState(false);
-  const socket = useRef<WebSocket | null>(null);
-  const sessionRef = useRef(session);
-  sessionRef.current = session;
-  const lastSpoken = useRef("");
-  const outputRef = useRef(voiceOutput);
-  outputRef.current = voiceOutput;
-  const transcriptEnd = useRef<HTMLDivElement>(null);
-  const send = useCallback((m: ClientMessage) => {
-    if (socket.current?.readyState !== WebSocket.OPEN) {
+  const [connected, setConnected] = useState(false),
+    [assessor, setAssessor] = useState("rules"),
+    [nativeAvailable, setNativeAvailable] = useState(false);
+  const [transport, setTransport] = useState<VoiceTransport>("browser"),
+    [budget, setBudget] = useState(600);
+  const [starting, setStarting] = useState(false),
+    [warning, setWarning] = useState(""),
+    [input, setInput] = useState("");
+  const [coachText, setCoachText] = useState(""),
+    [drawer, setDrawer] = useState<"transcript" | "rubric" | "setup" | null>(
+      null,
+    );
+  const [showText, setShowText] = useState(false);
+  const ws = useRef<WebSocket | null>(null),
+    state = useRef<Session | undefined>(undefined),
+    selectedMode = useRef(false);
+  const send = useCallback((event: ClientMessage) => {
+    if (ws.current?.readyState === WebSocket.OPEN)
+      ws.current.send(JSON.stringify(event));
+    else
       setWarning(
-        "Connection lost. Reconnect to start a new session. Export any captured work first.",
+        "Coach connection lost. Export your session, then reload to reconnect.",
       );
-      return;
-    }
-    socket.current.send(JSON.stringify(m));
   }, []);
-  const speech = useSpeech(
-    (text, confidence) => send({ type: "segment", text, confidence }),
-    () => send({ type: "activity" }),
-  );
-  const speechRef = useRef(speech);
-  speechRef.current = speech;
+  const voice = useVoice({
+    onFinal: (text, confidence, questionIndex) => {
+      if (text) send({ type: "segment", text, confidence, questionIndex });
+    },
+    onPreview: (text, questionIndex) =>
+      send({ type: "preview", text, questionIndex }),
+    onActivity: () => send({ type: "activity" }),
+    onPlayback: (id, status, heardText, playbackMs) =>
+      send({ type: "playback", id, status, heardText, playbackMs }),
+  });
+  const voiceRef = useRef(voice);
+  voiceRef.current = voice;
   useEffect(() => {
     let disposed = false;
-    const ws = new WebSocket(
+    const socket = new WebSocket(
       `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`,
     );
-    socket.current = ws;
-    ws.onopen = () => {
+    ws.current = socket;
+    socket.onopen = () => {
       if (!disposed) setConnected(true);
     };
-    ws.onmessage = (event) => {
-      const m = JSON.parse(event.data);
-      if (m.type === "hello") setMode(m.assessor);
-      if (m.type === "state") setSession(m.session);
-      if (m.type === "clock")
-        setSession((previous) =>
-          previous ? { ...previous, elapsed: m.elapsed } : previous,
-        );
-      if (m.type === "warning" || m.type === "error") setWarning(m.message);
+    socket.onmessage = (e) => {
+      const event = JSON.parse(e.data);
+      if (event.type === "hello") {
+        setAssessor(event.assessor);
+        setNativeAvailable(event.realtimeConfigured);
+        if (!selectedMode.current && event.realtimeConfigured)
+          setTransport("native");
+      }
+      if (event.type === "state") {
+        state.current = event.session;
+        setSession(event.session);
+      }
+      if (event.type === "clock")
+        setSession((s) => {
+          if (!s) return s;
+          const next = { ...s, elapsed: event.elapsed };
+          state.current = next;
+          return next;
+        });
+      if (event.type === "coach") {
+        setCoachText(event.text);
+        voiceRef.current.say(event as CoachMessage);
+      }
+      if (event.type === "error" || event.type === "warning")
+        setWarning(event.message);
     };
-    ws.onclose = () => {
+    socket.onclose = () => {
       if (!disposed) {
         setConnected(false);
-        speechRef.current.stop();
+        voiceRef.current.stop();
         setWarning(
-          "Connection closed. Your captured session is still available to export. Reload to reconnect; sessions are not stored on the server.",
+          "Connection closed. Your last visible session can still be exported. Reload to reconnect.",
         );
       }
     };
-    ws.onerror = () => {
+    socket.onerror = () => {
       if (!disposed)
         setWarning(
-          "Cannot reach the coach service. Check that the API server is running.",
+          "Cannot connect to the interview server. Check that npm run dev is running.",
         );
     };
     return () => {
       disposed = true;
-      ws.close();
+      voiceRef.current.stop();
+      socket.close();
     };
   }, []);
-  const running = session?.status === "running";
-  const active = running || session?.status === "paused";
-  const q = questions[session?.questionIndex ?? 0];
-  const currentEvidence =
-    session?.evidence.filter(
-      (e) => e.questionIndex === session.questionIndex,
-    ) ?? [];
-  const latestDecision = session?.decisions
-    .filter((d) => d.questionIndex === session.questionIndex)
-    .at(-1);
-  const recentDecision =
-    latestDecision && session && session.elapsed - latestDecision.at < 16
-      ? latestDecision
-      : undefined;
-  const protectedTime = Math.ceil(
-    (session?.protectedUntil ?? 0) - (session?.elapsed ?? 0),
-  );
   useEffect(() => {
-    if (!running || session?.awaitingNext || page !== "studio")
-      speechRef.current.stop();
-  }, [running, session?.status, session?.awaitingNext, page]);
-  useEffect(() => {
-    if (session?.status === "completed") {
-      window.speechSynthesis?.cancel();
-      setPage("review");
-    }
+    if (session?.status === "completed" || session?.status === "paused")
+      voiceRef.current.stop();
   }, [session?.status]);
   useEffect(() => {
-    if (!session || !running || !outputRef.current || session.demo) return;
-    const decision = session.decisions
-      .filter((d) => d.questionIndex === session.questionIndex)
-      .at(-1);
-    const key = decision
-      ? decision.id
-      : `${session.id}-q${session.questionIndex}`;
-    if (lastSpoken.current === key) return;
-    lastSpoken.current = key;
-    if (!("speechSynthesis" in window)) return;
-    // Stop recognition before synthesis to keep the coach out of the candidate transcript.
-    const resume = speechRef.current.listening;
-    speechRef.current.stop();
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(
-      decision?.questionIndex === session.questionIndex
-        ? decision.message
-        : q.title,
-    );
-    utterance.rate = 0.98;
-    utterance.onend = () => {
-      if (
-        resume &&
-        sessionRef.current?.status === "running" &&
-        !sessionRef.current.awaitingNext
-      )
-        speechRef.current.start();
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDrawer(null);
     };
-    window.speechSynthesis.speak(utterance);
-  }, [
-    session?.decisions.length,
-    session?.questionIndex,
-    session?.id,
-    running,
-    q.title,
-  ]);
-  useEffect(() => {
-    transcriptEnd.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "nearest",
-    });
-  }, [session?.segments.length, speech.interim]);
-  const start = (demo?: Demo) => {
-    speech.stop();
-    window.speechSynthesis?.cancel();
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, []);
+  const active = session?.status === "running",
+    completed = session?.status === "completed";
+  const question = questions[session?.questionIndex ?? 0],
+    trajectory = session?.signals.trajectory;
+  const decision = session?.decisions.at(-1);
+  const timeline = session
+    ? [
+        ...session.coachTurns.map((turn) => ({
+          kind: "coach" as const,
+          data: turn,
+        })),
+        ...session.segments.map((segment) => ({
+          kind: "user" as const,
+          data: segment,
+        })),
+      ].sort((a, b) => a.data.sequence - b.data.sequence)
+    : [];
+  const start = async (mode = transport) => {
+    if (starting || active) return;
+    setStarting(true);
     setWarning("");
     setInput("");
-    setTab("transcript");
-    setPage("studio");
-    lastSpoken.current = "";
-    send({ type: "start", budget, ...(demo ? { demo } : {}) });
+    setCoachText("");
+    setTransport(mode);
+    setShowText(mode === "text");
+    try {
+      await voice.start(mode);
+      send({ type: "start", budget });
+      setDrawer(null);
+    } catch {
+      /* Voice hook provides the specific connection error. */
+    } finally {
+      setStarting(false);
+    }
+  };
+  const end = () => {
+    voice.stop();
+    send({ type: "end" });
   };
   const submit = () => {
-    if (!input.trim() || !running || session?.awaitingNext) return;
-    send({ type: "segment", text: input.trim(), confidence: 1 });
+    if (!input.trim() || !active) return;
+    send({
+      type: "segment",
+      text: input.trim(),
+      confidence: 1,
+      questionIndex: session.questionIndex,
+    });
     setInput("");
   };
-  const stopAudio = () => {
-    speech.stop();
-    window.speechSynthesis?.cancel();
-  };
-  const download = () => {
+  const exportSession = () => {
     if (!session) return;
-    const blob = new Blob(
-      [
-        JSON.stringify(
-          {
-            schemaVersion: 1,
-            exportedAt: new Date().toISOString(),
-            assessor: mode,
-            questions,
-            session,
-            note: "Prototype rubric signals, not validated competency or hiring scores. Replay runs are synthetic.",
-          },
-          null,
-          2,
-        ),
-      ],
-      { type: "application/json" },
+    const url = URL.createObjectURL(
+      new Blob(
+        [
+          JSON.stringify(
+            {
+              schemaVersion: 2,
+              exportedAt: new Date().toISOString(),
+              transport,
+              assessor,
+              recoveryRubric: RECOVERY_RUBRIC,
+              questions,
+              references,
+              session,
+              note: "Recovery values are uncalibrated estimates, not measured probabilities. No raw audio is stored by this app.",
+            },
+            null,
+            2,
+          ),
+        ],
+        { type: "application/json" },
+      ),
     );
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `cadence-${session.id.slice(0, 8)}.json`;
-    a.click();
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `cadence-${session.id.slice(0, 8)}.json`;
+    link.click();
     URL.revokeObjectURL(url);
   };
-  const evidenceCount = session?.evidence.length ?? 0;
+  const phaseLabel = !active
+    ? completed
+      ? "INTERVIEW COMPLETE"
+      : "LIVE VOICE INTERVIEW"
+    : voice.phase === "speaking"
+      ? "CADENCE IS SPEAKING"
+      : voice.phase === "connecting"
+        ? "CONNECTING AUDIO"
+        : voice.muted
+          ? "MICROPHONE MUTED"
+          : transport === "text"
+            ? "TEXT PRACTICE"
+            : "LISTENING TO YOUR THINKING";
   return (
-    <div className="app-shell">
-      <header className="topbar">
-        <a
-          className="brand"
-          href="#"
-          onClick={(e) => {
-            e.preventDefault();
-            setPage("studio");
-          }}
-          aria-label="Cadence home"
-        >
-          <span className="brand-icon">
-            <AudioLines size={24} />
+    <div className="voice-app">
+      <header className="app-header">
+        <a className="wordmark" href="#" onClick={(e) => e.preventDefault()}>
+          <span>
+            <AudioLines size={21} />
           </span>
           cadence<span className="brand-dot">.</span>
         </a>
-        <nav aria-label="Main navigation">
-          {(
-            [
-              ["studio", "Live studio"],
-              ["review", "Session review"],
-              ["approach", "Our approach"],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              className={page === id ? "nav-active" : ""}
-              onClick={() => setPage(id)}
-            >
-              {label}
-              {id === "studio" && active && <span className="tiny-dot" />}
-            </button>
-          ))}
-        </nav>
-        <div className="header-right">
-          <span className={`connection ${connected ? "" : "offline"}`}>
-            <i />
-            {connected ? "Coach connected" : "Connecting"}
-          </span>
-          <span className="avatar">You</span>
+        <div className="header-center">
+          <span className={`status-dot ${connected ? "" : "disconnected"}`} />
+          {connected ? "Interview coach connected" : "Connecting to coach"}
         </div>
+        <button
+          className="header-button"
+          onClick={() => setDrawer("setup")}
+          aria-label="Voice settings"
+        >
+          <Settings2 size={17} />
+          <span>Voice settings</span>
+        </button>
       </header>
-      <main>
-        {warning && (
-          <div className="notice" role="alert">
-            <CircleHelp size={18} />
-            <span>{warning}</span>
+      <main className="voice-main">
+        {(warning || voice.error) && (
+          <div className="notification" role="alert">
+            <Info size={17} />
+            <span>{warning || voice.error}</span>
             <button
-              aria-label="Dismiss notification"
-              onClick={() => setWarning("")}
+              onClick={() => {
+                setWarning("");
+                if (voice.error) setDrawer("setup");
+              }}
+              aria-label="Notification details"
             >
-              <X size={17} />
+              <Settings2 size={15} />
             </button>
           </div>
         )}
-        {page === "studio" && (
-          <>
-            <div className="page-heading">
-              <div>
-                <div className="eyebrow">
-                  <span /> YOUR SPACE TO GET BETTER
-                </div>
-                <h1>Find your interview rhythm.</h1>
-                <p>
-                  Thoughtful practice. Timely guidance. A more confident you.
-                </p>
-              </div>
-              <div className="heading-detail">
-                <ShieldCheck size={17} />
-                <span>Built to listen first.</span>
-              </div>
-            </div>
-            <div className="session-bar">
-              <div>
-                <span className="small-icon">
-                  <Target size={18} />
-                </span>
-                <strong>Mechanical engineer</strong>
-                <span className="bar-divider" />
-                <span>3 questions</span>
-                <span className="desktop-only">·</span>
-                <span className="desktop-only">
-                  Design, problem solving & ownership
-                </span>
-              </div>
-              <label className="duration">
-                <Clock3 size={15} />
-                <select
-                  aria-label="Session duration"
-                  value={budget}
-                  disabled={active}
-                  onChange={(e) => setBudget(Number(e.target.value))}
-                >
-                  <option value={300}>5 minute session</option>
-                  <option value={600}>10 minute session</option>
-                  <option value={900}>15 minute session</option>
-                </select>
-                <ChevronDown size={13} />
-              </label>
-            </div>
-            {session?.demo && active && (
-              <div className="demo-banner">
-                <Play size={15} /> Guided replay ·{" "}
-                {session.demo === "drift"
-                  ? "Off-topic drift"
-                  : session.demo === "pause"
-                    ? "A long pause"
-                    : "Productive reasoning"}
-                <span>
-                  Synthetic answer · 4× speed ·{" "}
-                  {mode === "rules" ? "rules baseline" : "AI assessor"}
-                </span>
-              </div>
-            )}
-            <div className="studio-grid">
-              <div className="main-column">
-                <section className="question-card">
-                  <div className="question-meta">
-                    <span>
-                      QUESTION{" "}
-                      {String((session?.questionIndex ?? 0) + 1).padStart(
-                        2,
-                        "0",
-                      )}{" "}
-                      <span className="muted">/ 03</span>
-                    </span>
-                    <span className="topic-pill">{q.topic}</span>
-                  </div>
-                  <h2>{q.title}</h2>
-                  <p>{q.context}</p>
-                </section>
-                <section
-                  className={`coach-stage ${active ? "is-active" : ""} ${speech.listening ? "is-listening" : ""} ${recentDecision?.action === "REDIRECT" ? "is-redirect" : ""}`}
-                  aria-label="Interview coach"
-                >
-                  <div className="stage-top">
-                    <span className="stage-label">
-                      <span className="tiny-dot" />
-                      {active
-                        ? session?.status === "paused"
-                          ? "SESSION PAUSED"
-                          : "ADAPTIVE COACH"
-                        : "MEET YOUR PRACTICE PARTNER"}
-                    </span>
-                    <button
-                      className={`icon-button ${voiceOutput ? "selected" : ""}`}
-                      aria-label={
-                        voiceOutput ? "Mute coach voice" : "Enable coach voice"
-                      }
-                      title="Coach voice"
-                      onClick={() => {
-                        setVoiceOutput(!voiceOutput);
-                        if (voiceOutput) window.speechSynthesis?.cancel();
-                      }}
-                    >
-                      {voiceOutput ? (
-                        <Volume2 size={18} />
-                      ) : (
-                        <VolumeX size={18} />
-                      )}
-                    </button>
-                  </div>
-                  <div className="coach-content">
-                    <div className="orb-wrap">
-                      <div className="orb-ring ring-one" />
-                      <div className="orb-ring ring-two" />
-                      <div className="coach-orb">
-                        <AudioLines size={49} strokeWidth={1.2} />
-                      </div>
-                      <span className="orb-spark spark-one" />
-                      <span className="orb-spark spark-two" />
-                    </div>
-                    <span
-                      className={`coach-state ${recentDecision?.action === "REDIRECT" ? "amber" : ""}`}
-                    >
-                      <span className="tiny-dot" />
-                      {!active
-                        ? "A LITTLE GUIDANCE. A LOT OF GROWTH."
-                        : session?.status === "paused"
-                          ? "TAKE A BREATHER"
-                          : protectedTime > 0
-                            ? `THINKING SPACE · ${protectedTime}s`
-                            : recentDecision
-                              ? actionLabels[
-                                  recentDecision.action
-                                ].toUpperCase()
-                              : speech.listening
-                                ? "LISTENING TO YOU"
-                                : "READY WHEN YOU ARE"}
-                    </span>
-                    <h3 aria-live="polite">
-                      {!active
-                        ? "Good answers start with a little space."
-                        : session?.status === "paused"
-                          ? "We’ll be right here."
-                          : protectedTime > 0
-                            ? "Take your time. You have room to think."
-                            : recentDecision
-                              ? recentDecision.message
-                              : "I’m listening. Walk me through your thinking."}
-                    </h3>
-                    <p>
-                      {!active
-                        ? "Think out loud. Explore your ideas. Your coach will help you find your way back when you need it."
-                        : session?.status === "paused"
-                          ? "Your timer is paused. Resume whenever you’re ready."
-                          : session?.insight}
-                    </p>
-                    {!active && (
-                      <button
-                        className="button primary start-button"
-                        disabled={!connected}
-                        onClick={() => start()}
-                      >
-                        Let’s start practicing <ArrowRight size={17} />
-                      </button>
-                    )}
-                    {active && recentDecision && protectedTime <= 0 && (
-                      <div className="feedback">
-                        <span>Was that well timed?</span>
-                        <button
-                          className={
-                            recentDecision.feedback === "helpful"
-                              ? "chosen"
-                              : ""
-                          }
-                          onClick={() =>
-                            send({
-                              type: "feedback",
-                              id: recentDecision.id,
-                              value: "helpful",
-                            })
-                          }
-                        >
-                          Helpful
-                        </button>
-                        <button
-                          className={
-                            recentDecision.feedback === "early" ? "chosen" : ""
-                          }
-                          onClick={() =>
-                            send({
-                              type: "feedback",
-                              id: recentDecision.id,
-                              value: "early",
-                            })
-                          }
-                        >
-                          Too soon
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  <div className="stage-bottom">
-                    <span>
-                      <Headphones size={15} />
-                      {!active
-                        ? "A conversation, not a countdown."
-                        : session?.demo
-                          ? "Watch how the coach responds to this answer."
-                          : "No rush. A pause is part of the process."}
-                    </span>
-                    <span className="mode-label">
-                      {mode === "ai"
-                        ? "AI semantic assessor"
-                        : "Local rules baseline"}
-                    </span>
-                  </div>
-                </section>
-                <section className="transcript-card">
-                  <div className="transcript-header">
-                    <div className="tabs">
-                      <button
-                        className={tab === "transcript" ? "active" : ""}
-                        onClick={() => setTab("transcript")}
-                      >
-                        <FileText size={16} />
-                        Live transcript
-                        {running && <span className="tiny-dot" />}
-                      </button>
-                      <button
-                        className={tab === "notes" ? "active" : ""}
-                        onClick={() => setTab("notes")}
-                      >
-                        Coach notes{" "}
-                        <span className="count">
-                          {session?.decisions.length ?? 0}
-                        </span>
-                      </button>
-                    </div>
-                    <span className="caption">
-                      {session?.demo
-                        ? "Sample transcript"
-                        : "Only finalized text is assessed"}
-                    </span>
-                  </div>
-                  <div className="transcript-scroll" aria-live="polite">
-                    {tab === "transcript" ? (
-                      <>
-                        {!session?.segments.length && (
-                          <div className="empty-transcript">
-                            <span>
-                              <AudioLines size={19} />
-                            </span>
-                            <p>
-                              Your thoughts go here.
-                              <small>
-                                Start a session, then speak or type an answer.
-                              </small>
-                            </p>
-                          </div>
-                        )}
-                        {session?.segments.map((seg) => (
-                          <div className="transcript-line" key={seg.id}>
-                            <span className="transcript-avatar">Y</span>
-                            <div>
-                              <div className="transcript-byline">
-                                <strong>You</strong>
-                                <time>{time(seg.at)}</time>
-                                <span>Q{seg.questionIndex + 1}</span>
-                                {seg.confidence === null && (
-                                  <span>Confidence unavailable</span>
-                                )}
-                              </div>
-                              <p>{seg.text}</p>
-                            </div>
-                          </div>
-                        ))}
-                        {speech.interim && (
-                          <div className="interim">
-                            {speech.interim}
-                            <span className="blinking"> ▍</span>
-                          </div>
-                        )}
-                        <div ref={transcriptEnd} />
-                      </>
-                    ) : (
-                      <>
-                        {!session?.decisions.length && (
-                          <div className="empty-transcript">
-                            <span>
-                              <Lightbulb size={19} />
-                            </span>
-                            <p>
-                              Help when it matters.
-                              <small>
-                                Prompts and their reasons will appear here.
-                              </small>
-                            </p>
-                          </div>
-                        )}
-                        {session?.decisions.map((d) => (
-                          <div key={d.id} className="note-row">
-                            <span
-                              className={`action-dot action-${d.action.toLowerCase()}`}
-                            />
-                            <div>
-                              <strong>
-                                {actionLabels[d.action]}{" "}
-                                <time>{time(d.at)}</time>
-                              </strong>
-                              <p>{d.message}</p>
-                              <small>{d.reason}</small>
-                            </div>
-                          </div>
-                        ))}
-                      </>
-                    )}
-                  </div>
-                  <div className="input-area">
-                    <div className="input-mode">
-                      <button
-                        className={inputMode === "text" ? "active" : ""}
-                        onClick={() => {
-                          stopAudio();
-                          setInputMode("text");
-                        }}
-                      >
-                        <FileText size={13} />
-                        Type answer
-                      </button>
-                      <button
-                        className={inputMode === "voice" ? "active" : ""}
-                        onClick={() => setInputMode("voice")}
-                      >
-                        <Mic size={13} />
-                        Use microphone
-                      </button>
-                      <span>
-                        {inputMode === "text"
-                          ? "Shift + Enter for a new line"
-                          : "Chrome / Edge recommended"}
-                      </span>
-                    </div>
-                    {inputMode === "text" ? (
-                      <div className="composer">
-                        <textarea
-                          aria-label="Your answer"
-                          placeholder={
-                            active
-                              ? "Think out loud, one thought at a time…"
-                              : "Start your session to begin…"
-                          }
-                          rows={2}
-                          maxLength={4000}
-                          value={input}
-                          disabled={
-                            !running ||
-                            Boolean(session?.demo) ||
-                            session?.awaitingNext
-                          }
-                          onChange={(e) => {
-                            setInput(e.target.value);
-                            send({ type: "activity" });
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" && !e.shiftKey) {
-                              e.preventDefault();
-                              submit();
-                            }
-                          }}
-                        />
-                        <button
-                          aria-label="Send answer"
-                          className="send-button"
-                          onClick={submit}
-                          disabled={
-                            !running || !input.trim() || session?.awaitingNext
-                          }
-                        >
-                          <Send size={18} />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="voice-area">
-                        {!voiceConsent ? (
-                          <>
-                            <p>
-                              Your browser’s speech service may process audio.
-                              Only finalized text is sent to this app
-                              {mode === "ai" ? " and the AI provider" : ""};
-                              audio is not stored by Cadence.
-                            </p>
-                            <button
-                              className="button secondary"
-                              onClick={() => setVoiceConsent(true)}
-                            >
-                              I agree to use browser speech recognition
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              className={`button ${speech.listening ? "recording" : "secondary"}`}
-                              disabled={
-                                !running ||
-                                Boolean(session?.demo) ||
-                                session?.awaitingNext ||
-                                !speech.supported
-                              }
-                              onClick={() =>
-                                speech.listening
-                                  ? speech.stop()
-                                  : speech.start()
-                              }
-                            >
-                              {speech.listening ? (
-                                <MicOff size={16} />
-                              ) : (
-                                <Mic size={16} />
-                              )}
-                              {speech.listening
-                                ? "Stop microphone"
-                                : "Start microphone"}
-                            </button>
-                            <span>
-                              {speech.listening
-                                ? "Microphone on · speak naturally"
-                                : speech.supported
-                                  ? "Microphone is off"
-                                  : "Speech recognition unavailable. Use text mode."}
-                            </span>
-                          </>
-                        )}
-                        {speech.error && (
-                          <p className="error-text" role="alert">
-                            {speech.error}
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </section>
-                {active && (
-                  <div className="session-controls">
-                    {recentDecision && protectedTime <= 0 && (
-                      <div className="control-alert" role="status">
-                        <Lightbulb size={16} />
-                        <p>
-                          <strong>{actionLabels[recentDecision.action]}</strong>
-                          {recentDecision.message}
-                        </p>
-                      </div>
-                    )}
-                    <div className="timer">
-                      <Clock3 size={17} />
-                      <strong>
-                        {time(
-                          (session?.budget ?? budget) - (session?.elapsed ?? 0),
-                        )}
-                      </strong>
-                      <span>remaining</span>
-                    </div>
-                    <div className="control-buttons">
-                      <button
-                        className="button plain"
-                        onClick={() => {
-                          stopAudio();
-                          send({ type: running ? "pause" : "resume" });
-                        }}
-                      >
-                        {running ? <Pause size={15} /> : <Play size={15} />}
-                        {running ? "Pause" : "Resume"}
-                      </button>
-                      <button
-                        className="button plain"
-                        onClick={() => setShowEnd(true)}
-                      >
-                        <Square size={13} />
-                        End
-                      </button>
-                      <button
-                        className="button secondary"
-                        disabled={!running || Boolean(session?.demo)}
-                        onClick={() => {
-                          speech.stop();
-                          send({ type: "finish" });
-                        }}
-                      >
-                        Finish answer <Check size={15} />
-                      </button>
-                      <button
-                        className="button primary"
-                        disabled={!running}
-                        onClick={() => {
-                          stopAudio();
-                          setInput("");
-                          send({ type: "next" });
-                        }}
-                      >
-                        {session?.questionIndex === 2
-                          ? "Complete"
-                          : "Next question"}
-                        <ArrowRight size={15} />
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-              <aside className="side-column">
-                <section className="evidence-card">
-                  <div className="card-title">
-                    <span className="small-icon">
-                      <CheckCheck size={19} />
-                    </span>
-                    <h3>Your answer, taking shape</h3>
-                  </div>
-                  <p className="card-description">
-                    Useful evidence, one idea at a time.
-                  </p>
-                  <div className="coverage-meta">
-                    <span>QUESTION COVERAGE</span>
-                    <strong>
-                      {currentEvidence.length}
-                      <span> / {q.rubric.length}</span>
-                    </strong>
-                  </div>
-                  <div className="coverage-bars">
-                    {q.rubric.map((r) => (
-                      <span
-                        key={r.id}
-                        className={
-                          currentEvidence.some((e) => e.criterionId === r.id)
-                            ? "filled"
-                            : ""
-                        }
-                      />
-                    ))}
-                  </div>
-                  <div className="rubric-list">
-                    {q.rubric.map((r, i) => {
-                      const e = currentEvidence.find(
-                        (e) => e.criterionId === r.id,
-                      );
-                      return (
-                        <div
-                          className={`rubric-item ${e ? "has-evidence" : ""}`}
-                          key={r.id}
-                        >
-                          <button
-                            aria-expanded={expanded === r.id}
-                            onClick={() =>
-                              setExpanded(expanded === r.id ? undefined : r.id)
-                            }
-                          >
-                            <span className="rubric-number">
-                              {e ? <Check size={13} /> : `0${i + 1}`}
-                            </span>
-                            <span>
-                              <strong>{r.label}</strong>
-                              <small>
-                                {e
-                                  ? e.assisted
-                                    ? "Assisted signal"
-                                    : "Evidence captured"
-                                  : "Listening for evidence"}
-                              </small>
-                            </span>
-                            <ChevronRight
-                              size={15}
-                              className={expanded === r.id ? "rotated" : ""}
-                            />
-                          </button>
-                          {expanded === r.id && (
-                            <div className="rubric-detail">
-                              <p>{r.description}</p>
-                              {e && <blockquote>“{e.quote}”</blockquote>}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className="evidence-footnote">
-                    <ShieldCheck size={14} />
-                    <span>
-                      {mode === "rules"
-                        ? "Keyword-based signals, not validated scores."
-                        : "Quote-backed AI signals, not hiring scores."}
-                    </span>
-                  </div>
-                </section>
-                <section className="thinking-card">
-                  <div className="thinking-icon">
-                    <Coffee size={22} />
-                  </div>
-                  <h3>A little space to think.</h3>
-                  <p>
-                    A thoughtful pause is a good thing. Ask for more time or a
-                    small nudge.
-                  </p>
-                  <div>
-                    <button
-                      className="button secondary"
-                      disabled={!running || session?.awaitingNext}
-                      onClick={() => send({ type: "think" })}
-                    >
-                      <Clock3 size={14} />
-                      +30s to think
-                    </button>
-                    <button
-                      className="hint-button"
-                      disabled={!running || session?.awaitingNext}
-                      onClick={() => send({ type: "hint" })}
-                    >
-                      Give me a hint
-                      <Lightbulb size={14} />
-                    </button>
-                  </div>
-                  <small>
-                    Hints are labelled. Your session timer stays fixed.
-                  </small>
-                </section>
-                <section className="replay-card">
-                  <div className="replay-heading">
-                    <span>
-                      <Play size={13} />
-                    </span>
-                    <h3>See the timing in action</h3>
-                    <span className="mini-pill">DEMO</span>
-                  </div>
-                  <p>Three sample answers. Three different rhythms.</p>
-                  {(
-                    [
-                      [
-                        "drift",
-                        "An answer goes off track",
-                        "Watch a gentle redirect",
-                      ],
-                      [
-                        "pause",
-                        "A longer moment of silence",
-                        "See support without pressure",
-                      ],
-                      [
-                        "thinking",
-                        "Good thinking takes time",
-                        "See when the coach stays quiet",
-                      ],
-                    ] as const
-                  ).map(([id, title, detail]) => (
-                    <button
-                      key={id}
-                      disabled={active || !connected}
-                      className="replay-option"
-                      onClick={() => start(id)}
-                    >
-                      <span className="replay-play">
-                        <Play size={12} />
-                      </span>
-                      <span>
-                        <strong>{title}</strong>
-                        <small>{detail}</small>
-                      </span>
-                      <ArrowRight size={14} />
-                    </button>
-                  ))}
-                </section>
-              </aside>
-            </div>
-            <div className="studio-foot">
-              <Waves size={16} />
-              <span>
-                The best coach knows when to speak — and when to let you find
-                the words.
-              </span>
-              <span>Listen. Understand. Guide.</span>
-            </div>
-          </>
-        )}
-        {page === "review" && (
-          <>
-            <div className="page-heading">
-              <div>
-                <div className="eyebrow">
-                  <span /> REFLECT. RESET. KEEP GROWING.
-                </div>
-                <h1>Your practice, in perspective.</h1>
-                <p>
-                  Look at the evidence behind your answer, not just how long you
-                  spoke.
-                </p>
-              </div>
-              {session && (
-                <button className="button secondary" onClick={download}>
-                  <ArrowDownToLine size={16} />
-                  Export session
-                </button>
+        <div className="session-meta">
+          <span>MECHANICAL ENGINEERING</span>
+          <span className="meta-separator">/</span>
+          <span>
+            {active
+              ? `${String(session.questionIndex + 1).padStart(2, "0")} OF 03 QUESTIONS`
+              : "DESIGN · REASONING · OWNERSHIP"}
+          </span>
+          {active && (
+            <span className="remaining">
+              <Clock3 size={12} />
+              {formatTime(session.budget - session.elapsed)}
+            </span>
+          )}
+        </div>
+        <section className={`conversation ${active ? "in-session" : ""}`}>
+          <div className="question-heading">
+            <div className="eyebrow">{phaseLabel}</div>
+            <h1>
+              {active ? (
+                question.title
+              ) : completed ? (
+                "A little more practice. A little more confidence."
+              ) : (
+                <>
+                  An interview that
+                  <br />
+                  <span>follows your thinking.</span>
+                </>
               )}
-            </div>
-            {!session ? (
-              <section className="review-empty">
-                <div className="empty-review-icon">
-                  <FileText size={34} />
-                </div>
-                <h2>Your next step starts with one answer.</h2>
-                <p>
-                  Complete a practice session or explore a guided replay to see
-                  your evidence, coaching moments, and areas to revisit.
-                </p>
-                <button
-                  className="button primary"
-                  onClick={() => setPage("studio")}
-                >
-                  Go to live studio <ArrowRight size={16} />
-                </button>
-              </section>
-            ) : (
+            </h1>
+            {!active && !completed && (
+              <p>
+                Talk naturally. Your coach listens, spots a wrong turn,
+                <br className="desktop-break" /> and steps in when it’s time to
+                help you move forward.
+              </p>
+            )}
+            {active && <p>{question.context}</p>}
+          </div>
+          <button
+            className={`voice-orb ${active ? voice.phase : ""}`}
+            aria-label={
+              voice.phase === "speaking"
+                ? "Interrupt coach"
+                : "Voice conversation status"
+            }
+            disabled={voice.phase !== "speaking"}
+            onClick={voice.interruptCoach}
+          >
+            <span className="orb-aura" />
+            <span className="orb-surface">
+              <span className="orb-cloud cloud-one" />
+              <span className="orb-cloud cloud-two" />
+              <span className="orb-cloud cloud-three" />
+              <AudioLines size={57} strokeWidth={1.1} />
+            </span>
+          </button>
+          <div className="conversation-caption" aria-live="polite">
+            {active ? (
               <>
-                <div className="review-status">
-                  <span className="tiny-dot" />
-                  {session.status === "completed"
-                    ? session.completedReason
-                    : "Session in progress — this is a live snapshot."}
-                  {session.demo && (
-                    <span className="mini-pill">SYNTHETIC REPLAY</span>
-                  )}
-                  <span>
-                    {mode === "rules"
-                      ? "Rules baseline"
-                      : "AI semantic assessor"}{" "}
-                    · {time(session.elapsed)} elapsed
-                  </span>
-                </div>
-                <div className="metrics-grid">
-                  {[
-                    [
-                      `${evidenceCount}/${questions.length * 4}`,
-                      "Rubric signals",
-                      "Across all three questions",
-                    ],
-                    [
-                      String(
-                        session.evidence.filter((e) => !e.assisted).length,
-                      ),
-                      "Independent signals",
-                      "Before hints for that rubric area",
-                    ],
-                    [
-                      String(session.decisions.length),
-                      "Coaching moments",
-                      `${session.decisions.filter((d) => d.feedback === "early").length} marked “too soon”`,
-                    ],
-                    [
-                      session.elapsed >= 1
-                        ? (evidenceCount / (session.elapsed / 60)).toFixed(1)
-                        : "—",
-                      "Signals per minute",
-                      "Exploratory, not a validated measure",
-                    ],
-                  ].map(([value, label, detail]) => (
-                    <section className="metric-card" key={label}>
-                      <span>{label}</span>
-                      <strong>{value}</strong>
-                      <small>{detail}</small>
-                    </section>
-                  ))}
-                </div>
-                <div className="review-grid">
-                  <section className="review-card">
-                    <div className="section-heading">
-                      <h2>Your evidence ledger</h2>
-                      <span className="caption">
-                        Click an area to read the supporting quote
-                      </span>
-                    </div>
-                    {questions.map((question, index) => (
-                      <div className="review-question" key={question.id}>
-                        <div className="review-question-title">
-                          <span>0{index + 1}</span>
-                          <div>
-                            <strong>{question.topic}</strong>
-                            <p>{question.title}</p>
-                          </div>
-                        </div>
-                        {question.rubric.map((r) => {
-                          const e = session.evidence.find(
-                            (e) =>
-                              e.questionIndex === index &&
-                              e.criterionId === r.id,
-                          );
-                          return (
-                            <details key={r.id}>
-                              <summary>
-                                <span
-                                  className={`ledger-check ${e ? "filled" : ""}`}
-                                >
-                                  {e ? <Check size={12} /> : "–"}
-                                </span>
-                                <span>{r.label}</span>
-                                <small>
-                                  {e
-                                    ? e.assisted
-                                      ? "Assisted"
-                                      : "Independent"
-                                    : "No signal captured"}
-                                </small>
-                                <ChevronDown size={13} />
-                              </summary>
-                              <p>{e ? `“${e.quote}”` : r.description}</p>
-                            </details>
-                          );
-                        })}
-                      </div>
-                    ))}
-                  </section>
-                  <div className="review-side">
-                    <section className="review-card">
-                      <div className="section-heading">
-                        <h2>Coaching timeline</h2>
-                        <Clock3 size={17} />
-                      </div>
-                      {session.decisions.length === 0 ? (
-                        <p className="card-description">
-                          No interruptions so far. Listening is a decision, too.
-                        </p>
-                      ) : (
-                        session.decisions.map((d) => (
-                          <div key={d.id} className="timeline-item">
-                            <span className="timeline-time">{time(d.at)}</span>
-                            <div>
-                              <strong>{actionLabels[d.action]}</strong>
-                              <p>{d.reason}</p>
-                              <div className="timeline-feedback">
-                                <button
-                                  className={
-                                    d.feedback === "helpful" ? "chosen" : ""
-                                  }
-                                  onClick={() =>
-                                    send({
-                                      type: "feedback",
-                                      id: d.id,
-                                      value: "helpful",
-                                    })
-                                  }
-                                >
-                                  Helpful
-                                </button>
-                                <button
-                                  className={
-                                    d.feedback === "early" ? "chosen" : ""
-                                  }
-                                  onClick={() =>
-                                    send({
-                                      type: "feedback",
-                                      id: d.id,
-                                      value: "early",
-                                    })
-                                  }
-                                >
-                                  Too soon
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </section>
-                    <section className="review-tip">
-                      <Lightbulb size={22} />
-                      <h3>Something to try next time</h3>
-                      <p>
-                        {session.evidence.length
-                          ? "Build each answer around your approach, a reasoned choice, and how you would verify the result. Use one concrete example for each."
-                          : "Start with what you know. Explain one concrete step and why it matters, then build your answer from there."}
-                      </p>
-                      <button
-                        className="button secondary"
-                        onClick={() => setPage("studio")}
-                      >
-                        {active ? "Return to your session" : "Back to studio"}
-                        <ArrowRight size={16} />
-                      </button>
-                    </section>
-                    <p className="privacy-note">
-                      <ShieldCheck size={15} />
-                      This session lives in memory. Export it before reloading.
-                      No audio is stored by this app. Signals may be inaccurate;
-                      review the quotes.
-                    </p>
-                  </div>
+                <span className="speaker-label">
+                  {voice.interim ? "YOU" : "CADENCE"}
+                </span>
+                <p>
+                  {voice.interim ||
+                    coachText ||
+                    "Take your time. I’m listening."}
+                </p>
+                {voice.phase === "speaking" && (
+                  <button
+                    className="interrupt-link"
+                    onClick={voice.interruptCoach}
+                  >
+                    Tap to interrupt & speak
+                  </button>
+                )}
+              </>
+            ) : completed ? (
+              <>
+                <span className="speaker-label">YOUR SESSION</span>
+                <p>
+                  {session.completedReason} {session.evidence.length} rubric
+                  signals captured across {session.questionIndex + 1} questions.
+                </p>
+                <div className="completion-actions">
+                  <button
+                    className="button secondary"
+                    onClick={() => setDrawer("transcript")}
+                  >
+                    <FileText size={15} />
+                    Review conversation
+                  </button>
+                  <button className="button secondary" onClick={exportSession}>
+                    <ArrowDownToLine size={15} />
+                    Export
+                  </button>
                 </div>
               </>
-            )}
-          </>
-        )}
-        {page === "approach" && (
-          <>
-            <div className="page-heading">
-              <div>
-                <div className="eyebrow">
-                  <span /> THE THOUGHT BEHIND THE TIMING
-                </div>
-                <h1>More listening. Better questions.</h1>
-                <p>A coach that follows your reasoning, not just the clock.</p>
-              </div>
-            </div>
-            <section className="approach-hero">
-              <div>
-                <span className="topic-pill">OUR GUIDING PRINCIPLE</span>
-                <h2>
-                  A pause is not proof
-                  <br />
-                  that you’re stuck.
-                </h2>
-                <p>
-                  Cadence follows the problem in your project slides: collect
-                  useful competency evidence within a fixed interview budget,
-                  while minimizing unnecessary interruptions.
-                </p>
-              </div>
-              <div className="approach-orb">
-                <AudioLines size={88} strokeWidth={1} />
-              </div>
-            </section>
-            <div className="principles-grid">
-              {[
-                [
-                  Headphones,
-                  "01",
-                  "Listen by default",
-                  "Finalized transcript chunks are assessed against a small, explicit question rubric. New evidence and productive reasoning protect thinking time.",
-                ],
-                [
-                  Target,
-                  "02",
-                  "Intervene proportionately",
-                  "Sustained drift can trigger a redirect. A long pause earns an offer of support. A targeted probe fills a gap; sufficient coverage invites the next question.",
-                ],
-                [
-                  ShieldCheck,
-                  "03",
-                  "Leave you in control",
-                  "Minimum answer time, confidence gates, a natural pause, and a 20-second cooldown limit interruptions. Request thinking space, pause, skip, or mark coaching as too early.",
-                ],
-              ].map(([Icon, number, title, text]) => {
-                const I = Icon as typeof Headphones;
-                return (
-                  <section className="principle-card" key={String(number)}>
-                    <div>
-                      <I size={23} />
-                      <span>{String(number)}</span>
-                    </div>
-                    <h3>{String(title)}</h3>
-                    <p>{String(text)}</p>
-                  </section>
-                );
-              })}
-            </div>
-            <div className="approach-details">
-              <section className="review-card">
-                <h2>A small, transparent first step</h2>
-                <p>
-                  The local baseline matches engineering terms and simple
-                  explanation patterns. It can confuse keyword overlap with
-                  genuine understanding, and miss good paraphrases. Its signals
-                  are demonstrations, not validated competency assessments.
-                </p>
-                <p>
-                  With a server-side API key, an AI assessor evaluates
-                  relevance, repetition, productive reasoning, and quote-backed
-                  evidence. The same explicit timing policy controls
-                  interventions. Candidate answers are treated as data, never
-                  instructions.
-                </p>
-                <span className="tech-pill">
-                  <Radio size={14} />
-                  Your current mode:{" "}
-                  {mode === "ai"
-                    ? "AI semantic assessor"
-                    : "local rules baseline"}
+            ) : (
+              <>
+                <span className="caption-icon">
+                  <Headphones size={15} />
                 </span>
-              </section>
-              <section className="review-card">
-                <h2>Efficiency is a hypothesis to test</h2>
-                <p>
-                  The included automated scenarios check productive thinking,
-                  drift, uncertainty, long pauses, hints and time budgets.
-                  Session exports preserve the evidence and decision timeline
-                  for replay and human annotation.
-                </p>
-                <p>
-                  Showing better evidence per minute requires a
-                  participant-separated benchmark and controlled comparison with
-                  timeout and turn-level baselines. This prototype does not
-                  claim a measured improvement or estimate cognitive state from
-                  silence.
-                </p>
-              </section>
+                <p>A live conversation. No record-and-submit steps.</p>
+              </>
+            )}
+          </div>
+          {!active && (
+            <div className="start-area">
+              <button
+                className="button primary start-voice"
+                disabled={
+                  !connected ||
+                  starting ||
+                  (transport === "native" && !nativeAvailable)
+                }
+                onClick={() => void start()}
+              >
+                <AudioLines size={19} />
+                {starting
+                  ? "Connecting…"
+                  : completed
+                    ? "Start a new interview"
+                    : "Start voice interview"}
+                <ArrowRight size={16} />
+              </button>
+              <button
+                className="text-link"
+                disabled={!connected || starting}
+                onClick={() => void start("text")}
+              >
+                Prefer typing? Try text practice
+              </button>
+              <p className="consent-note">
+                Starting voice allows microphone processing by your selected
+                speech provider.
+                <br />
+                Cadence does not save an audio recording.
+              </p>
             </div>
-          </>
+          )}
+        </section>
+        {active && (
+          <div className="live-controls-area">
+            <div className="live-status">
+              <span
+                className={`status-dot ${voice.muted ? "disconnected" : ""}`}
+              />
+              <span>
+                {transport === "text"
+                  ? "Send each thought as you go"
+                  : voice.phase === "speaking"
+                    ? "You can interrupt the coach"
+                    : voice.muted
+                      ? "Unmute to continue"
+                      : "Speak freely — no send button needed"}
+              </span>
+            </div>
+            <div className="live-controls">
+              <button
+                className={`round-control ${voice.muted ? "muted" : ""}`}
+                onClick={voice.toggleMute}
+                disabled={transport === "text"}
+                aria-label={
+                  voice.muted ? "Unmute microphone" : "Mute microphone"
+                }
+              >
+                {voice.muted ? <MicOff size={21} /> : <Mic size={21} />}
+              </button>
+              <button
+                className={`round-control ${showText ? "selected" : ""}`}
+                onClick={() => setShowText(!showText)}
+                aria-label="Toggle text input"
+              >
+                <MessageSquare size={20} />
+              </button>
+              <button
+                className="end-control"
+                onClick={end}
+                aria-label="End interview"
+              >
+                <PhoneOff size={22} />
+              </button>
+              <button
+                className="round-control"
+                onClick={() => setDrawer("transcript")}
+                aria-label="Open transcript"
+              >
+                <FileText size={20} />
+              </button>
+              <button
+                className="round-control"
+                onClick={() => setDrawer("rubric")}
+                aria-label="Open interruption rubric"
+              >
+                <Activity size={20} />
+              </button>
+            </div>
+            <div className="secondary-controls">
+              <button onClick={() => send({ type: "think" })}>
+                <Clock3 size={13} />
+                Give me a moment
+              </button>
+              <span>·</span>
+              <button onClick={() => send({ type: "hint" })}>
+                <Lightbulb size={13} />A small hint
+              </button>
+              <span>·</span>
+              <button onClick={() => send({ type: "next" })}>
+                Skip question
+                <ArrowRight size={13} />
+              </button>
+            </div>
+            {showText && (
+              <div className="text-composer">
+                <textarea
+                  aria-label="Your answer"
+                  placeholder="Type a thought, or say ‘I don’t know’ to move on…"
+                  value={input}
+                  maxLength={4000}
+                  rows={2}
+                  onChange={(e) => {
+                    setInput(e.target.value);
+                    send({ type: "activity" });
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      submit();
+                    }
+                  }}
+                />
+                <button
+                  aria-label="Send answer"
+                  onClick={submit}
+                  disabled={!input.trim()}
+                >
+                  <Send size={18} />
+                </button>
+              </div>
+            )}
+          </div>
         )}
-        <footer>
-          <span className="footer-brand">
-            <AudioLines size={16} />
-            cadence.
-          </span>
-          <span>A calmer way to find your voice.</span>
+        <div className="transport-note">
+          <ShieldCheck size={13} />
           <span>
-            Practice with purpose <MoveUpRight size={12} />
+            {transport === "native"
+              ? "Native WebRTC audio · AEC requested · separate interruption controller"
+              : transport === "browser"
+                ? "Browser voice · automatic turn-taking · local prototype"
+                : "Text practice · same interruption controller"}
           </span>
-        </footer>
+          <button onClick={() => setDrawer("rubric")}>
+            {assessor === "ai"
+              ? "AI semantic assessment"
+              : "Limited local reference checks"}
+            <Info size={12} />
+          </button>
+        </div>
+        {!active && (
+          <div className="principles">
+            <div>
+              <span>01</span>
+              <strong>Listens through uncertainty</strong>
+              <p>A plausible way back earns more time.</p>
+            </div>
+            <div>
+              <span>02</span>
+              <strong>Interrupts with a reason</strong>
+              <p>A clear error or sustained drift triggers action.</p>
+            </div>
+            <div>
+              <span>03</span>
+              <strong>Moves the interview forward</strong>
+              <p>“I don’t know” can be an honest next step.</p>
+            </div>
+          </div>
+        )}
       </main>
-      {showEnd && (
-        <div className="modal-backdrop" onClick={() => setShowEnd(false)}>
-          <section
+      <footer className="app-footer">
+        <span>LESS SCRIPT. MORE CONVERSATION.</span>
+        <span>Listen. Understand. Intervene.</span>
+        <button onClick={() => setDrawer("rubric")}>
+          How the timing works
+          <ArrowRight size={12} />
+        </button>
+      </footer>
+      {drawer && (
+        <div className="drawer-backdrop" onClick={() => setDrawer(null)}>
+          <aside
+            className="detail-drawer"
             role="dialog"
             aria-modal="true"
-            aria-labelledby="end-title"
-            className="modal"
+            aria-labelledby="drawer-title"
             onClick={(e) => e.stopPropagation()}
           >
-            <span className="small-icon">
-              <Coffee size={24} />
-            </span>
-            <h2 id="end-title">Ready to wrap up?</h2>
-            <p>
-              Your captured answers and coaching moments will be available in
-              the session review.
-            </p>
-            <div>
+            <div className="drawer-header">
+              <div>
+                <span className="eyebrow">BEHIND THE CONVERSATION</span>
+                <h2 id="drawer-title">
+                  {drawer === "setup"
+                    ? "Voice settings"
+                    : drawer === "rubric"
+                      ? "The interruption rubric"
+                      : "Your conversation"}
+                </h2>
+              </div>
               <button
-                className="button secondary"
-                onClick={() => setShowEnd(false)}
+                aria-label="Close panel"
+                className="close-panel"
+                onClick={() => setDrawer(null)}
               >
-                Keep practicing
-              </button>
-              <button
-                className="button primary"
-                autoFocus
-                onClick={() => {
-                  stopAudio();
-                  send({ type: "end" });
-                  setShowEnd(false);
-                }}
-              >
-                End & review
-                <ArrowRight size={15} />
+                <X size={19} />
               </button>
             </div>
-          </section>
+            {drawer === "setup" && (
+              <div className="settings-body">
+                <p>
+                  Choose your audio path. Native audio keeps input and output
+                  streams open; browser voice is an automatic fallback.
+                </p>
+                <label
+                  className={`transport-option ${transport === "native" ? "selected" : ""}`}
+                >
+                  <input
+                    type="radio"
+                    name="transport"
+                    checked={transport === "native"}
+                    disabled={active}
+                    onChange={() => {
+                      selectedMode.current = true;
+                      setTransport("native");
+                    }}
+                  />
+                  <span>
+                    <strong>
+                      Native realtime audio <span className="tag">WebRTC</span>
+                    </strong>
+                    <small>
+                      Speech-to-speech transport, echo cancellation, candidate
+                      barge-in and playback cancellation.{" "}
+                      {nativeAvailable
+                        ? "Server key configured; provider access is verified on connection."
+                        : "Requires OPENAI_API_KEY on the server."}
+                    </small>
+                  </span>
+                </label>
+                <label
+                  className={`transport-option ${transport === "browser" ? "selected" : ""}`}
+                >
+                  <input
+                    type="radio"
+                    name="transport"
+                    checked={transport === "browser"}
+                    disabled={active}
+                    onChange={() => {
+                      selectedMode.current = true;
+                      setTransport("browser");
+                    }}
+                  />
+                  <span>
+                    <strong>
+                      Browser voice <span className="tag">No API key</span>
+                    </strong>
+                    <small>
+                      Automatically speaks and listens between turns. Uses
+                      browser recognition and speech synthesis; this is not
+                      native full duplex.
+                    </small>
+                  </span>
+                </label>
+                <label className="duration-setting">
+                  <Clock3 size={16} />
+                  Interview duration
+                  <select
+                    aria-label="Interview duration"
+                    value={budget}
+                    disabled={active}
+                    onChange={(e) => setBudget(Number(e.target.value))}
+                  >
+                    <option value={300}>5 minutes</option>
+                    <option value={600}>10 minutes</option>
+                    <option value={900}>15 minutes</option>
+                  </select>
+                  <ChevronDown size={14} />
+                </label>
+                <div className="info-box">
+                  <Info size={17} />
+                  <p>
+                    Native mode uses your browser’s interim speech monitor for
+                    pre-end-of-turn judgments where supported. Provider
+                    transcription alone may arrive after a turn. No measured
+                    sub-250 ms latency or speaker identification is claimed.
+                  </p>
+                </div>
+                <button
+                  className="button secondary"
+                  onClick={voice.resumeAudio}
+                >
+                  <Volume2 size={16} />
+                  Resume native audio
+                </button>
+                <p className="small-print">
+                  Chrome or Edge recommended. Use headphones to reduce acoustic
+                  echo. No audio recordings are saved by this app; selected
+                  providers process microphone audio. Live provider performance
+                  depends on credentials, network and browser support.
+                </p>
+              </div>
+            )}
+            {drawer === "rubric" && (
+              <div className="rubric-body">
+                <p className="drawer-intro">
+                  Estimate the chance that the current answer will return to
+                  relevant, defensible reasoning within{" "}
+                  {RECOVERY_RUBRIC.horizonSeconds} seconds without help.
+                </p>
+                <div className="probability-card">
+                  <span>ESTIMATED RECOVERY</span>
+                  <strong>
+                    {trajectory
+                      ? `${Math.round(trajectory.recoveryProbability * 100)}%`
+                      : "—"}
+                  </strong>
+                  <small>
+                    {trajectory
+                      ? `${trajectory.basis === "heuristic" ? "Heuristic estimate" : "Model-informed estimate"} · ${trajectory.provisional ? "provisional speech" : "finalized chunk"}`
+                      : "Speak an answer to see the current estimate."}
+                  </small>
+                  <div className="probability-track">
+                    <i
+                      style={{
+                        width: `${(trajectory?.recoveryProbability ?? 0) * 100}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+                <p className="uncalibrated">
+                  <Info size={13} />
+                  These are uncalibrated estimates, not measured probabilities
+                  of ability.
+                </p>
+                <div className="threshold-row">
+                  <span className="threshold-dot green" />
+                  <div>
+                    <strong>55–100% · Keep listening</strong>
+                    <p>
+                      Useful reasoning, a plausible connection, or
+                      self-correction. Let the candidate finish the thought.
+                    </p>
+                  </div>
+                </div>
+                <div className="threshold-row">
+                  <span className="threshold-dot amber" />
+                  <div>
+                    <strong>20–55% · Watch, then redirect</strong>
+                    <p>
+                      Wait for distinct content windows. Offer a route back when
+                      drift persists.
+                    </p>
+                  </div>
+                </div>
+                <div className="threshold-row">
+                  <span className="threshold-dot red" />
+                  <div>
+                    <strong>0–20% · Interrupt & move on</strong>
+                    <p>
+                      Requires sustained drift or a quote-backed technical error
+                      and sufficient assessment confidence. An explicit skip
+                      request acts immediately.
+                    </p>
+                  </div>
+                </div>
+                <h3>What influenced this estimate?</h3>
+                {trajectory ? (
+                  <ul className="factor-list">
+                    {trajectory.factors.map((f) => (
+                      <li key={f}>{f}</li>
+                    ))}
+                    {trajectory.factors.length === 0 && (
+                      <li>No decisive error or drift signal.</li>
+                    )}
+                  </ul>
+                ) : (
+                  <p className="small-print">
+                    Relevance, correctness, repetition, progress, and signs of
+                    recovery.
+                  </p>
+                )}
+                {trajectory?.errorQuote && (
+                  <blockquote>
+                    “{trajectory.errorQuote}”
+                    <small>{trajectory.correction}</small>
+                  </blockquote>
+                )}
+                <h3>Question reference</h3>
+                <ul className="reference-list">
+                  {references[question.id].expected.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+                <h3>Latest intervention</h3>
+                <p className="small-print">
+                  {decision?.reason || "No intervention yet."}
+                </p>
+                {decision && (
+                  <div className="feedback-buttons">
+                    <button
+                      className={
+                        decision.feedback === "helpful" ? "chosen" : ""
+                      }
+                      onClick={() =>
+                        send({
+                          type: "feedback",
+                          id: decision.id,
+                          value: "helpful",
+                        })
+                      }
+                    >
+                      Well timed
+                    </button>
+                    <button
+                      className={decision.feedback === "early" ? "chosen" : ""}
+                      onClick={() =>
+                        send({
+                          type: "feedback",
+                          id: decision.id,
+                          value: "early",
+                        })
+                      }
+                    >
+                      Too early
+                    </button>
+                  </div>
+                )}
+                <div className="info-box">
+                  <ShieldCheck size={17} />
+                  <p>
+                    The local prototype catches only documented reference errors
+                    and obvious conversational signals. Enable semantic AI to
+                    evaluate a wider range of technical claims; it can still be
+                    wrong.
+                  </p>
+                </div>
+              </div>
+            )}
+            {drawer === "transcript" && (
+              <div className="transcript-body">
+                <div className="transcript-toolbar">
+                  <span>
+                    {session
+                      ? `${formatTime(session.elapsed)} · ${session.evidence.length} rubric signals`
+                      : "No session yet"}
+                  </span>
+                  <button disabled={!session} onClick={exportSession}>
+                    <ArrowDownToLine size={14} />
+                    Export JSON
+                  </button>
+                </div>
+                {!session && (
+                  <p className="drawer-intro">
+                    Start an interview to see your conversation here.
+                  </p>
+                )}
+                {timeline.map((entry) =>
+                  entry.kind === "coach" ? (
+                    <div className="chat-turn coach-turn" key={entry.data.id}>
+                      <span>CADENCE · Q{entry.data.questionIndex + 1}</span>
+                      <p>{entry.data.text}</p>
+                      {entry.data.status === "interrupted" && (
+                        <small>
+                          Interrupted · {Math.round(entry.data.playbackMs)} ms
+                          played.{" "}
+                          {entry.data.heardText
+                            ? `Heard prefix: “${entry.data.heardText}”`
+                            : "Exact heard words unavailable; native context is truncated by audio time."}
+                        </small>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="chat-turn user-turn" key={entry.data.id}>
+                      <span>
+                        YOU · Q{entry.data.questionIndex + 1} ·{" "}
+                        {formatTime(entry.data.at)}
+                      </span>
+                      <p>{entry.data.text}</p>
+                    </div>
+                  ),
+                )}
+                {session && (
+                  <>
+                    <h3>Evidence captured</h3>
+                    {session.evidence.length === 0 && (
+                      <p className="small-print">
+                        No trusted rubric signals captured. An incomplete answer
+                        is not a diagnosis of ability.
+                      </p>
+                    )}
+                    {session.evidence.map((e) => (
+                      <div
+                        className="evidence-row"
+                        key={`${e.questionIndex}-${e.criterionId}`}
+                      >
+                        <Check size={13} />
+                        <p>
+                          <strong>
+                            {
+                              questions[e.questionIndex].rubric.find(
+                                (r) => r.id === e.criterionId,
+                              )?.label
+                            }
+                          </strong>
+                          <span>
+                            {e.assisted ? "Assisted" : "Independent"} · Q
+                            {e.questionIndex + 1}
+                          </span>
+                          <q>{e.quote}</q>
+                        </p>
+                      </div>
+                    ))}
+                  </>
+                )}
+                <p className="small-print retention-note">
+                  Session data stays in memory. Export before reloading. Coach
+                  text is the intended utterance; playback status distinguishes
+                  spoken, interrupted and queued turns.
+                </p>
+              </div>
+            )}
+          </aside>
         </div>
       )}
     </div>

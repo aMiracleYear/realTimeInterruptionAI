@@ -36,7 +36,7 @@ test("new rubric evidence is deduplicated, backed by the exact transcript, and p
   assert.equal(s.evidence.length, 1);
   assert.equal(decide(s)?.action, undefined);
 });
-test("one drift chunk is insufficient; sustained drift redirects at a pause", () => {
+test("one drift chunk is insufficient; low-recovery sustained drift interrupts without waiting for a pause", () => {
   const s = createSession();
   evaluate(s, 5, relevant);
   evaluate(s, 13, offTopic);
@@ -47,10 +47,9 @@ test("one drift chunk is insufficient; sustained drift redirects at a pause", ()
     23,
     "The food and music at the party made the whole weekend wonderful, and we talked about another holiday.",
   );
-  tick(s, 24);
-  assert.equal(s.decisions.length, 0, "no interruption before the boundary");
-  tick(s, 25);
-  assert.equal(s.decisions.at(-1)?.action, "REDIRECT");
+  decide(s);
+  assert.equal(s.decisions.at(-1)?.action, "NEXT");
+  assert.equal(s.decisions.at(-1)?.interrupt, true);
 });
 test("a long pause offers optional help without declaring the candidate stuck, and cooldown prevents rapid repeat", () => {
   const s = createSession();
@@ -72,8 +71,8 @@ test("productive reasoning is allowed to continue while incomplete coverage is s
   assert.equal(s.evidence.length, 3);
   assert.equal(s.decisions.length, 0);
 });
-test("unknown and low ASR confidence suppress evidence and content interventions", () => {
-  for (const confidence of [null, 0.3]) {
+test("known low ASR confidence suppresses evidence and content interventions", () => {
+  for (const confidence of [0.3]) {
     const s = createSession();
     evaluate(s, 5, relevant, confidence);
     evaluate(s, 15, offTopic, confidence);
