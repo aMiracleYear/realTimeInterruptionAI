@@ -61,6 +61,8 @@ See [the full recovery rubric](docs/interruption-policy.md) for the equation, th
 
 See the [multi-model voice architecture research](docs/multi-model-voice-architecture.md) for a proposed faster interruption controller, source comparisons, computational optimizations and a latency evaluation plan.
 
+The [shared inference and guarded speculation proposal](docs/speculative-interview-architecture.md) develops a more substantial architecture, with an executable scheduling experiment, exact-reuse safeguards, and counterexamples showing where faster execution can hurt recovery or increase cost.
+
 | Situation                                                            | Behavior                                                                      |
 | -------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | Explicit “I don't know” / skip request                               | Immediately acknowledge and advance; no old 12-second minimum or cooldown     |

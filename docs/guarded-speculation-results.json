@@ -1,0 +1,631 @@
+{
+  "kind": "Deterministic scheduling simulation, NOT measured model/audio performance",
+  "assumptions": "Same fixed synthetic assessor verdict per exact snapshot; 900ms external eligibility guard; one worker; default one speculative launch; stale work occupies worker until completion; fixed synthetic judge durations; no audio path",
+  "interpretation": "Zero invalid commits checks freshness/guard compliance only. Future correction can still make an earlier valid commitment harmful. Churn can increase both latency and compute.",
+  "results": [
+    {
+      "name": "stable-ready-before-gate",
+      "serial": {
+        "name": "stable-ready-before-gate",
+        "strategy": "serial",
+        "firstInterruptionMs": 1500,
+        "assessorCalls": 1,
+        "assessorWorkMs": 600,
+        "speculativeCalls": 0,
+        "staleCompletions": 0,
+        "policyBlocked": 0,
+        "failures": 0,
+        "maxFallbackQueueMs": 0,
+        "invalidCommits": 0,
+        "harmfulInterruptionCount": 0,
+        "decisions": [
+          {
+            "at": 1500,
+            "observationAt": 0,
+            "snapshot": {
+              "epoch": "question-1",
+              "revision": 1,
+              "request": "{\"text\":\"A supported wrong claim\",\"provisional\":true,\"model\":\"unchanged-judge\",\"reference\":\"v1\"}"
+            },
+            "action": "interrupt",
+            "harmful": false
+          }
+        ],
+        "jobs": [
+          {
+            "id": 0,
+            "start": 900,
+            "end": 1500,
+            "speculative": false,
+            "revision": 1
+          }
+        ]
+      },
+      "speculative": {
+        "name": "stable-ready-before-gate",
+        "strategy": "speculative",
+        "firstInterruptionMs": 900,
+        "assessorCalls": 1,
+        "assessorWorkMs": 600,
+        "speculativeCalls": 1,
+        "staleCompletions": 0,
+        "policyBlocked": 0,
+        "failures": 0,
+        "maxFallbackQueueMs": 0,
+        "invalidCommits": 0,
+        "harmfulInterruptionCount": 0,
+        "decisions": [
+          {
+            "at": 900,
+            "observationAt": 0,
+            "snapshot": {
+              "epoch": "question-1",
+              "revision": 1,
+              "request": "{\"text\":\"A supported wrong claim\",\"provisional\":true,\"model\":\"unchanged-judge\",\"reference\":\"v1\"}"
+            },
+            "action": "interrupt",
+            "harmful": false
+          }
+        ],
+        "jobs": [
+          {
+            "id": 0,
+            "start": 0,
+            "end": 600,
+            "speculative": true,
+            "revision": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "stable-adopt-in-flight",
+      "serial": {
+        "name": "stable-adopt-in-flight",
+        "strategy": "serial",
+        "firstInterruptionMs": 2300,
+        "assessorCalls": 1,
+        "assessorWorkMs": 1400,
+        "speculativeCalls": 0,
+        "staleCompletions": 0,
+        "policyBlocked": 0,
+        "failures": 0,
+        "maxFallbackQueueMs": 0,
+        "invalidCommits": 0,
+        "harmfulInterruptionCount": 0,
+        "decisions": [
+          {
+            "at": 2300,
+            "observationAt": 0,
+            "snapshot": {
+              "epoch": "question-1",
+              "revision": 1,
+              "request": "{\"text\":\"A supported wrong claim\",\"provisional\":true,\"model\":\"unchanged-judge\",\"reference\":\"v1\"}"
+            },
+            "action": "interrupt",
+            "harmful": false
+          }
+        ],
+        "jobs": [
+          {
+            "id": 0,
+            "start": 900,
+            "end": 2300,
+            "speculative": false,
+            "revision": 1
+          }
+        ]
+      },
+      "speculative": {
+        "name": "stable-adopt-in-flight",
+        "strategy": "speculative",
+        "firstInterruptionMs": 1400,
+        "assessorCalls": 1,
+        "assessorWorkMs": 1400,
+        "speculativeCalls": 1,
+        "staleCompletions": 0,
+        "policyBlocked": 0,
+        "failures": 0,
+        "maxFallbackQueueMs": 0,
+        "invalidCommits": 0,
+        "harmfulInterruptionCount": 0,
+        "decisions": [
+          {
+            "at": 1400,
+            "observationAt": 0,
+            "snapshot": {
+              "epoch": "question-1",
+              "revision": 1,
+              "request": "{\"text\":\"A supported wrong claim\",\"provisional\":true,\"model\":\"unchanged-judge\",\"reference\":\"v1\"}"
+            },
+            "action": "interrupt",
+            "harmful": false
+          }
+        ],
+        "jobs": [
+          {
+            "id": 0,
+            "start": 0,
+            "end": 1400,
+            "speculative": true,
+            "revision": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "correction-before-gate",
+      "serial": {
+        "name": "correction-before-gate",
+        "strategy": "serial",
+        "firstInterruptionMs": null,
+        "assessorCalls": 1,
+        "assessorWorkMs": 600,
+        "speculativeCalls": 0,
+        "staleCompletions": 0,
+        "policyBlocked": 0,
+        "failures": 0,
+        "maxFallbackQueueMs": 0,
+        "invalidCommits": 0,
+        "harmfulInterruptionCount": 0,
+        "decisions": [
+          {
+            "at": 2399,
+            "observationAt": 899,
+            "snapshot": {
+              "epoch": "question-1",
+              "revision": 2,
+              "request": "{\"text\":\"Actually, the correction is…\",\"provisional\":true,\"model\":\"unchanged-judge\",\"reference\":\"v1\"}"
+            },
+            "action": "listen",
+            "harmful": false
+          }
+        ],
+        "jobs": [
+          {
+            "id": 0,
+            "start": 1799,
+            "end": 2399,
+            "speculative": false,
+            "revision": 2
+          }
+        ]
+      },
+      "speculative": {
+        "name": "correction-before-gate",
+        "strategy": "speculative",
+        "firstInterruptionMs": null,
+        "assessorCalls": 2,
+        "assessorWorkMs": 1200,
+        "speculativeCalls": 1,
+        "staleCompletions": 0,
+        "policyBlocked": 0,
+        "failures": 0,
+        "maxFallbackQueueMs": 0,
+        "invalidCommits": 0,
+        "harmfulInterruptionCount": 0,
+        "decisions": [
+          {
+            "at": 2399,
+            "observationAt": 899,
+            "snapshot": {
+              "epoch": "question-1",
+              "revision": 2,
+              "request": "{\"text\":\"Actually, the correction is…\",\"provisional\":true,\"model\":\"unchanged-judge\",\"reference\":\"v1\"}"
+            },
+            "action": "listen",
+            "harmful": false
+          }
+        ],
+        "jobs": [
+          {
+            "id": 0,
+            "start": 0,
+            "end": 600,
+            "speculative": true,
+            "revision": 1
+          },
+          {
+            "id": 1,
+            "start": 1799,
+            "end": 2399,
+            "speculative": false,
+            "revision": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "revision-causes-contention",
+      "serial": {
+        "name": "revision-causes-contention",
+        "strategy": "serial",
+        "firstInterruptionMs": 2800,
+        "assessorCalls": 1,
+        "assessorWorkMs": 1800,
+        "speculativeCalls": 0,
+        "staleCompletions": 0,
+        "policyBlocked": 0,
+        "failures": 0,
+        "maxFallbackQueueMs": 0,
+        "invalidCommits": 0,
+        "harmfulInterruptionCount": 0,
+        "decisions": [
+          {
+            "at": 2800,
+            "observationAt": 100,
+            "snapshot": {
+              "epoch": "question-1",
+              "revision": 2,
+              "request": "{\"text\":\"Actually, the correction is…\",\"provisional\":true,\"model\":\"unchanged-judge\",\"reference\":\"v1\"}"
+            },
+            "action": "interrupt",
+            "harmful": false
+          }
+        ],
+        "jobs": [
+          {
+            "id": 0,
+            "start": 1000,
+            "end": 2800,
+            "speculative": false,
+            "revision": 2
+          }
+        ]
+      },
+      "speculative": {
+        "name": "revision-causes-contention",
+        "strategy": "speculative",
+        "firstInterruptionMs": 3600,
+        "assessorCalls": 2,
+        "assessorWorkMs": 3600,
+        "speculativeCalls": 1,
+        "staleCompletions": 1,
+        "policyBlocked": 0,
+        "failures": 0,
+        "maxFallbackQueueMs": 800,
+        "invalidCommits": 0,
+        "harmfulInterruptionCount": 0,
+        "decisions": [
+          {
+            "at": 3600,
+            "observationAt": 100,
+            "snapshot": {
+              "epoch": "question-1",
+              "revision": 2,
+              "request": "{\"text\":\"Actually, the correction is…\",\"provisional\":true,\"model\":\"unchanged-judge\",\"reference\":\"v1\"}"
+            },
+            "action": "interrupt",
+            "harmful": false
+          }
+        ],
+        "jobs": [
+          {
+            "id": 0,
+            "start": 0,
+            "end": 1800,
+            "speculative": true,
+            "revision": 1
+          },
+          {
+            "id": 1,
+            "start": 1800,
+            "end": 3600,
+            "speculative": false,
+            "revision": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "end-at-commit-boundary",
+      "serial": {
+        "name": "end-at-commit-boundary",
+        "strategy": "serial",
+        "firstInterruptionMs": null,
+        "assessorCalls": 0,
+        "assessorWorkMs": 0,
+        "speculativeCalls": 0,
+        "staleCompletions": 0,
+        "policyBlocked": 0,
+        "failures": 0,
+        "maxFallbackQueueMs": 0,
+        "invalidCommits": 0,
+        "harmfulInterruptionCount": 0,
+        "decisions": [],
+        "jobs": []
+      },
+      "speculative": {
+        "name": "end-at-commit-boundary",
+        "strategy": "speculative",
+        "firstInterruptionMs": null,
+        "assessorCalls": 1,
+        "assessorWorkMs": 900,
+        "speculativeCalls": 1,
+        "staleCompletions": 1,
+        "policyBlocked": 0,
+        "failures": 0,
+        "maxFallbackQueueMs": 0,
+        "invalidCommits": 0,
+        "harmfulInterruptionCount": 0,
+        "decisions": [],
+        "jobs": [
+          {
+            "id": 0,
+            "start": 0,
+            "end": 900,
+            "speculative": true,
+            "revision": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "thinking-protection",
+      "serial": {
+        "name": "thinking-protection",
+        "strategy": "serial",
+        "firstInterruptionMs": null,
+        "assessorCalls": 1,
+        "assessorWorkMs": 600,
+        "speculativeCalls": 0,
+        "staleCompletions": 0,
+        "policyBlocked": 1,
+        "failures": 0,
+        "maxFallbackQueueMs": 0,
+        "invalidCommits": 0,
+        "harmfulInterruptionCount": 0,
+        "decisions": [],
+        "jobs": [
+          {
+            "id": 0,
+            "start": 900,
+            "end": 1500,
+            "speculative": false,
+            "revision": 1
+          }
+        ]
+      },
+      "speculative": {
+        "name": "thinking-protection",
+        "strategy": "speculative",
+        "firstInterruptionMs": null,
+        "assessorCalls": 1,
+        "assessorWorkMs": 600,
+        "speculativeCalls": 1,
+        "staleCompletions": 0,
+        "policyBlocked": 1,
+        "failures": 0,
+        "maxFallbackQueueMs": 0,
+        "invalidCommits": 0,
+        "harmfulInterruptionCount": 0,
+        "decisions": [],
+        "jobs": [
+          {
+            "id": 0,
+            "start": 0,
+            "end": 600,
+            "speculative": true,
+            "revision": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "future-correction-counterexample",
+      "serial": {
+        "name": "future-correction-counterexample",
+        "strategy": "serial",
+        "firstInterruptionMs": null,
+        "assessorCalls": 2,
+        "assessorWorkMs": 2000,
+        "speculativeCalls": 0,
+        "staleCompletions": 1,
+        "policyBlocked": 0,
+        "failures": 0,
+        "maxFallbackQueueMs": 0,
+        "invalidCommits": 0,
+        "harmfulInterruptionCount": 0,
+        "decisions": [
+          {
+            "at": 3400,
+            "observationAt": 1500,
+            "snapshot": {
+              "epoch": "question-1",
+              "revision": 2,
+              "request": "{\"text\":\"Actually, the correction is…\",\"provisional\":true,\"model\":\"unchanged-judge\",\"reference\":\"v1\"}"
+            },
+            "action": "listen",
+            "harmful": false
+          }
+        ],
+        "jobs": [
+          {
+            "id": 0,
+            "start": 900,
+            "end": 1900,
+            "speculative": false,
+            "revision": 1
+          },
+          {
+            "id": 1,
+            "start": 2400,
+            "end": 3400,
+            "speculative": false,
+            "revision": 2
+          }
+        ]
+      },
+      "speculative": {
+        "name": "future-correction-counterexample",
+        "strategy": "speculative",
+        "firstInterruptionMs": 1000,
+        "assessorCalls": 2,
+        "assessorWorkMs": 2000,
+        "speculativeCalls": 1,
+        "staleCompletions": 0,
+        "policyBlocked": 0,
+        "failures": 0,
+        "maxFallbackQueueMs": 0,
+        "invalidCommits": 0,
+        "harmfulInterruptionCount": 1,
+        "decisions": [
+          {
+            "at": 1000,
+            "observationAt": 0,
+            "snapshot": {
+              "epoch": "question-1",
+              "revision": 1,
+              "request": "{\"text\":\"A supported wrong claim\",\"provisional\":true,\"model\":\"unchanged-judge\",\"reference\":\"v1\"}"
+            },
+            "action": "interrupt",
+            "harmful": true
+          },
+          {
+            "at": 3400,
+            "observationAt": 1500,
+            "snapshot": {
+              "epoch": "question-1",
+              "revision": 2,
+              "request": "{\"text\":\"Actually, the correction is…\",\"provisional\":true,\"model\":\"unchanged-judge\",\"reference\":\"v1\"}"
+            },
+            "action": "listen",
+            "harmful": false
+          }
+        ],
+        "jobs": [
+          {
+            "id": 0,
+            "start": 0,
+            "end": 1000,
+            "speculative": true,
+            "revision": 1
+          },
+          {
+            "id": 1,
+            "start": 2400,
+            "end": 3400,
+            "speculative": false,
+            "revision": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "failed-preparation",
+      "serial": {
+        "name": "failed-preparation",
+        "strategy": "serial",
+        "firstInterruptionMs": null,
+        "assessorCalls": 1,
+        "assessorWorkMs": 600,
+        "speculativeCalls": 0,
+        "staleCompletions": 0,
+        "policyBlocked": 0,
+        "failures": 1,
+        "maxFallbackQueueMs": 0,
+        "invalidCommits": 0,
+        "harmfulInterruptionCount": 0,
+        "decisions": [],
+        "jobs": [
+          {
+            "id": 0,
+            "start": 900,
+            "end": 1500,
+            "speculative": false,
+            "revision": 1
+          }
+        ]
+      },
+      "speculative": {
+        "name": "failed-preparation",
+        "strategy": "speculative",
+        "firstInterruptionMs": null,
+        "assessorCalls": 2,
+        "assessorWorkMs": 1200,
+        "speculativeCalls": 1,
+        "staleCompletions": 0,
+        "policyBlocked": 0,
+        "failures": 2,
+        "maxFallbackQueueMs": 0,
+        "invalidCommits": 0,
+        "harmfulInterruptionCount": 0,
+        "decisions": [],
+        "jobs": [
+          {
+            "id": 0,
+            "start": 0,
+            "end": 600,
+            "speculative": true,
+            "revision": 1
+          },
+          {
+            "id": 1,
+            "start": 900,
+            "end": 1500,
+            "speculative": false,
+            "revision": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "failed-adopted-preparation",
+      "serial": {
+        "name": "failed-adopted-preparation",
+        "strategy": "serial",
+        "firstInterruptionMs": null,
+        "assessorCalls": 1,
+        "assessorWorkMs": 1400,
+        "speculativeCalls": 0,
+        "staleCompletions": 0,
+        "policyBlocked": 0,
+        "failures": 1,
+        "maxFallbackQueueMs": 0,
+        "invalidCommits": 0,
+        "harmfulInterruptionCount": 0,
+        "decisions": [],
+        "jobs": [
+          {
+            "id": 0,
+            "start": 900,
+            "end": 2300,
+            "speculative": false,
+            "revision": 1
+          }
+        ]
+      },
+      "speculative": {
+        "name": "failed-adopted-preparation",
+        "strategy": "speculative",
+        "firstInterruptionMs": null,
+        "assessorCalls": 2,
+        "assessorWorkMs": 2800,
+        "speculativeCalls": 1,
+        "staleCompletions": 0,
+        "policyBlocked": 0,
+        "failures": 2,
+        "maxFallbackQueueMs": 500,
+        "invalidCommits": 0,
+        "harmfulInterruptionCount": 0,
+        "decisions": [],
+        "jobs": [
+          {
+            "id": 0,
+            "start": 0,
+            "end": 1400,
+            "speculative": true,
+            "revision": 1
+          },
+          {
+            "id": 1,
+            "start": 1400,
+            "end": 2800,
+            "speculative": false,
+            "revision": 1
+          }
+        ]
+      }
+    }
+  ]
+}
