@@ -1,0 +1,105 @@
+[
+  {
+    "id": "sustained-drift",
+    "participantId": "synthetic-01",
+    "duration": 30,
+    "segments": [
+      {
+        "at": 5,
+        "confidence": 1,
+        "text": "First I would calculate the torque from power and speed to determine the bending loads at the supports."
+      },
+      {
+        "at": 13,
+        "confidence": 1,
+        "text": "The music festival was great and we spent the evening planning snacks and discussing our favourite films."
+      },
+      {
+        "at": 23,
+        "confidence": 1,
+        "text": "The food and music at the party made the whole weekend wonderful, and we talked about another holiday."
+      }
+    ],
+    "controls": [],
+    "windows": [{ "start": 24, "end": 28, "actions": ["REDIRECT"] }]
+  },
+  {
+    "id": "long-pause",
+    "participantId": "synthetic-02",
+    "duration": 30,
+    "segments": [
+      {
+        "at": 5,
+        "confidence": 1,
+        "text": "First I would calculate the torque from power and speed to determine the bending loads at the supports."
+      }
+    ],
+    "controls": [],
+    "windows": [{ "start": 23, "end": 27, "actions": ["PROMPT"] }]
+  },
+  {
+    "id": "productive-thinking",
+    "participantId": "synthetic-03",
+    "duration": 32,
+    "segments": [
+      {
+        "at": 5,
+        "confidence": 1,
+        "text": "First I would calculate the torque from power and speed to determine the bending loads at the supports."
+      },
+      {
+        "at": 15,
+        "confidence": 1,
+        "text": "I would check fatigue because fluctuating stress can cause failure below yield. A keyway increases local stress so I would include a safety factor."
+      },
+      {
+        "at": 25,
+        "confidence": 1,
+        "text": "I would compare a larger diameter with an alloy steel material, because the extra weight and manufacturing cost might outweigh the gain in strength."
+      }
+    ],
+    "controls": [],
+    "windows": []
+  },
+  {
+    "id": "uncertain-recognition",
+    "participantId": "synthetic-04",
+    "duration": 45,
+    "segments": [
+      {
+        "at": 5,
+        "confidence": 0.3,
+        "text": "The music festival was great and we spent the evening planning snacks and discussing our favourite films."
+      },
+      {
+        "at": 15,
+        "confidence": null,
+        "text": "The food and music at the party made the whole weekend wonderful, and we talked about another holiday."
+      }
+    ],
+    "controls": [],
+    "windows": []
+  },
+  {
+    "id": "quiet-start",
+    "participantId": "synthetic-05",
+    "duration": 26,
+    "segments": [],
+    "controls": [],
+    "windows": [{ "start": 18, "end": 22, "actions": ["PROMPT"] }]
+  },
+  {
+    "id": "thinking-override",
+    "participantId": "synthetic-06",
+    "duration": 45,
+    "segments": [
+      {
+        "at": 5,
+        "confidence": 1,
+        "text": "First I would calculate the torque from power and speed to determine the bending loads at the supports."
+      }
+    ],
+    "controls": [{ "at": 10, "type": "think" }],
+    "windows": [{ "start": 40, "end": 44, "actions": ["PROMPT"] }]
+  }
+]
